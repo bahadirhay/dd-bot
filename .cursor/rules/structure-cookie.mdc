@@ -1,0 +1,31 @@
+---
+description: Güncel çerez penceresi destek/direnç — grafikteki mavi çizgilerle aynı hesap
+globs: engine/breakout.py, engine/structure_cookie.py, engine/range_trade.py, dashboard/app.py
+alwaysApply: false
+---
+
+# Güncel çerez S/R (zorunlu kaynak)
+
+Elle çizilen **DESTEK / DİRENÇ** = `engine/structure_cookie.py` (`cookie_support`, `cookie_resistance`).
+
+## Pencere
+- **Makro** `STRUCTURE_COOKIE_BARS_MACRO` (96) ≈ 24h — işlem bandı
+- **Meso** `STRUCTURE_COOKIE_BARS` (32) / trend 16 — destek ince ayar
+- `meta["quality"]` ∈ `ok`|`kısmi` → trading band; swing ile genişletme yok
+
+## Kenar güveni
+- `support_confidence`, `resistance_confidence`, `min_edge_confidence`
+- Destek: çoklu impuls (`IMPULSE_TOP_N`) + küme + `MIN_FAILED_BREAKS`
+- Direnç: dokunuş kümesi + failed break üstü
+
+## Range (range_trade.py)
+- Skor: `edge_p × flow_p` (HTF +10 yok)
+- 15m DOWN → LONG yalnızca alt red/absorption (`RANGE_ARCHETYPE_STRICT`)
+- Eşik: `range_min_score(chop, edge_confidence)`
+
+## Yasak
+- Fiyat üstü swing tepe = destek
+- `break_level` ile çerez desteği birleştirme
+- Çerez zayıfken swing ile band doldurma
+
+Tam spec: `docs/STRUCTURE_COOKIE.md`

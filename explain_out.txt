@@ -1,0 +1,41 @@
+﻿=== BOT NE GORDU / NEDEN POZISYON YOK: 2026-05-30 12:15:00 UTC ===
+
+SAAT ESLESTIRME: Binance (TR): 2026-05-30 15:15 (Binance TR) | Bot sorgusu (UTC): 2026-05-30 12:15 UTC | 15m mum: 15m mum baslangicina hizalandi | Analiz araligi: ┬▒15 dk (toplam ~30 dk) | DB en yakin kayit: 2026-05-30 12:15:01 UTC (1 sn fark)
+
+YAPI ET─░KET─░ (kurallarimiz): YATAY
+  ÔåÆ 15m=UNCLEAR 1h=UNCLEAR kar─▒┼ş─▒k ÔÇö net trend yok.
+  Kap─▒: Trade i├ğin 1h+15m ayn─▒ y├Ân ┼şart.
+
+BOT KARARI: Pozisyon ACILMAZDI
+  15m yap─▒=UNCLEAR  1h yap─▒=UNCLEAR
+  Trend bias=DOWN  phase=drop  g├╝├ğ=62/100
+  trade_ok=False  1h+15m uyumlu=False
+
+--- Neden a├ğmad─▒? (s─▒rayla) ---
+  1. Yap─▒ etiketi: YATAY ÔÇö 15m=UNCLEAR 1h=UNCLEAR kar─▒┼ş─▒k ÔÇö net trend yok.
+  2. 1h+15m uyumsuz (15m=UNCLEAR, 1h=UNCLEAR) ÔÇö Trade i├ğin 1h+15m ayn─▒ y├Ân ┼şart.
+
+--- Piyasa verisi (o an) ---
+  Fiyat: 2016.30
+  ├ûzet: DOWN d├╝┼ş├╝┼ş g├╝├ğ=62% a├ğ─▒k15m=-0.01% yap─▒=UNCLEAR/UNCLEAR [1m] | 1h+15m uyumsuz (UNCLEAR/UNCLEAR) ÔÇö 15m tek basina trade yok
+  CVD5m=-559  Taker=30%  OI=2,207,972
+
+--- Grafikteki hareket (yorum) ---
+  1. Agresif sat─▒┼ş bask─▒s─▒ (CVD5m=-559) ÔÇö taker sat─▒m dominant.
+  2. Taker sat─▒┼ş oran─▒ y├╝ksek (70% sat─▒m).
+  3. Open Interest artm─▒yor ÔÇö d├╝┼ş├╝┼şte genelde tasfiye veya k─▒sa kapan─▒┼ş.
+
+--- YAPI ─░NCELEMES─░ (swing, se├ğilen ana g├Âre Binance) ---
+  Bot kayd─▒ndaki etiket: 15m=UNCLEAR  1h=UNCLEAR
+
+  15m hesaplanan=UNCLEAR (lookback=10)
+    Tepeler (2 swing): d├╝┼ş├╝yor [2046.0, 2023.3]
+    Dipler (3 swing): kar─▒┼ş─▒k [2003.0, 2005.79, 2000.83]
+    ÔåÆ DOWN i├ğin hem tepeler hem dipler d├╝┼şmeli; ┼şu an tepeler=d├╝┼ş├╝yor, dipler=kar─▒┼ş─▒k.
+
+  1h hesaplanan=UNCLEAR (lookback=3)
+    Tepeler (4 swing): kar─▒┼ş─▒k [2020.76, 2046.0, 2023.3]
+    Dipler (5 swing): kar─▒┼ş─▒k [1975.37, 2005.79, 2000.83]
+    ÔåÆ DOWN i├ğin hem tepeler hem dipler d├╝┼şmeli; ┼şu an tepeler=kar─▒┼ş─▒k, dipler=kar─▒┼ş─▒k.
+
+  Not: ┬½DOWN downtrend┬╗ momentum (mum rengi/CVD); yukar─▒daki DOWN/UP swing onay─▒d─▒r ÔÇö trade kap─▒s─▒ ikisini de ister.

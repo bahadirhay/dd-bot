@@ -1561,15 +1561,27 @@ def level_trade_ready(
     cvd: dict | None = None,
 ) -> tuple[bool, str]:
     """
-    RANGE icin 4 kosul — hepsi gecmeli:
+    RANGE icin kosullar:
+
+    Normal mod (range_locked=False):
       1) giris seviyesinde gecmis ret var
       2) son mumlar seviyeye/banda saygi gosteriyor (>50%)
       3) CVD karsi degil
-      4) TP tarafi (karsi band kenari) de en az bir kez test edilmis — cift tarafli kanal
+      4) TP tarafi (karsi band kenari) de en az bir kez test edilmis
+
+    Range locked mod (range_locked=True — fiyat dar kanalda):
+      1) Atlanir — kanal zaten teyit edilmis, gecmis ret aranmaz
+      2) Kosul 2 devam eder (saygi kontrolu)
+      3) Kosul 3 devam eder (CVD kontrolu)
+      4) Atlanir — kanal tek tarafli olabilir, bu normal
     """
     side = str(side or "").upper()
     support = float(levels.get("active_support") or 0)
     resistance = float(levels.get("active_resistance") or 0)
+
+    # range_locked state'den oku
+    range_locked = getattr(state, "v3_range_locked", False)
+
     if side in ("BUY", "LONG"):
         level = support
         direction = "BUY"
@@ -1586,12 +1598,17 @@ def level_trade_ready(
     if level <= 0:
         return False, f"{label} seviyesi yok."
 
-    historical = level_reliability(
-        bars15, level, direction, support=support, resistance=resistance
-    )
-    if historical <= 0.0:
-        return False, f"Kosul 1: {label} test edilmemis (ret=0%)."
+    # Koşul 1: geçmiş test — range_locked'da atla
+    if not range_locked:
+        historical = level_reliability(
+            bars15, level, direction, support=support, resistance=resistance
+        )
+        if historical <= 0.0:
+            return False, f"Kosul 1: {label} test edilmemis (ret=0%)."
+    else:
+        historical = 1.0  # range_locked'da varsayılan: kanal teyitli
 
+    # Koşul 2: güncel saygı
     recent = level_respect_now(
         bars15, level, direction, support=support, resistance=resistance
     )
@@ -1600,19 +1617,25 @@ def level_trade_ready(
             f"Kosul 2: {label} tutmuyor (saygi={recent:.0%}, esik>50%)."
         )
 
+    # Koşul 3: CVD
     momentum = cvd_supports_level(cvd, direction)
     if momentum <= 0.0:
         cvd_dir = str((cvd or {}).get("direction") or "?")
         return False, f"Kosul 3: CVD karsi ({cvd_dir})."
 
-    tp_ret = level_tp_reliability(bars15, support, resistance, side)
-    if tp_ret <= 0.0:
-        return False, (
-            f"Kosul 4: {tp_label} test edilmemis (tp_ret=0%) — kanal tek tarafli."
-        )
+    # Koşul 4: TP tarafı testi — range_locked'da atla
+    if not range_locked:
+        tp_ret = level_tp_reliability(bars15, support, resistance, side)
+        if tp_ret <= 0.0:
+            return False, (
+                f"Kosul 4: {tp_label} test edilmemis (tp_ret=0%) — kanal tek tarafli."
+            )
+    else:
+        tp_ret = 1.0  # range_locked'da atlanır
 
+    locked_tag = " [range_locked]" if range_locked else ""
     return True, (
-        f"ret={historical:.0%} saygi={recent:.0%} tp_ret={tp_ret:.0%}"
+        f"ret={historical:.0%} saygi={recent:.0%} tp_ret={tp_ret:.0%}{locked_tag}"
     )
 
 

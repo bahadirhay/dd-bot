@@ -1,11 +1,14 @@
 """
-engine/thesis_v3.py — Pozisyon = tez (3 katman).
+engine/thesis_v3.py — Pozisyon = tez (2 katman).
 
 Katman 1 — Seviye: 15m kapanis yapısal invalidation disinda
 Katman 2 — Momentum: CVD ters yon + confirmed + fiyat giris disinda
-Katman 3 — Zaman: N x 15m sonra beklenen ilerleme yok
 
-Herhangi biri -> tez bitti (15m kapanis aninda degerlendirilir; anlik fiyat degil).
+DÜZELTME: Katman 3 (zaman/ilerleme) KALDIRILDI.
+Zaman ve oran bazlı eşik yerine yapısal hesaplama kullanılır:
+- Fiyat invalidation seviyesini kırdıysa çık
+- CVD güçlü ters yöndeyse ve fiyat giriş altındaysa çık
+- Bunların hiçbiri olmadığı sürece pozisyon açık kalır
 """
 from __future__ import annotations
 
@@ -33,7 +36,7 @@ def _side_from_scenario(scenario: str, direction: str = "") -> str:
 
 
 def build_thesis(details: dict, *, price: float = 0) -> dict[str, Any]:
-    """Pozisyon acilirken tez — seviye + momentum + zaman katmanlari."""
+    """Pozisyon acilirken tez — seviye + momentum katmanlari."""
     scenario = str(details.get("v3_scenario") or details.get("scenario") or "")
     direction = str(details.get("direction") or "").upper()
     support = float(details.get("v3_support") or details.get("entry_support") or 0)
@@ -49,8 +52,6 @@ def build_thesis(details: dict, *, price: float = 0) -> dict[str, Any]:
         or 0
     )
     side = _side_from_scenario(scenario, direction)
-    stale_bars = int(getattr(cfg, "V3_THESIS_STALE_BARS", 8) or 8)
-    min_prog = float(getattr(cfg, "V3_THESIS_MIN_PROGRESS", 0.003) or 0.003)
     inv_cvd = "BEAR" if side == "LONG" else "BULL"
 
     if scenario.startswith("BREAKOUT_") or "BREAKOUT" in scenario:
@@ -60,14 +61,12 @@ def build_thesis(details: dict, *, price: float = 0) -> dict[str, Any]:
             return _pack(
                 "BREAKOUT_BUY", key, inv, "close_below_invalidation",
                 side="LONG", entry_px=entry_px, inv_cvd=inv_cvd,
-                stale_bars=stale_bars, min_prog=min_prog,
             )
         key = break_level or support
         inv = break_threshold_price(key, "LONG", entry_px) if key > 0 else 0.0
         return _pack(
             "BREAKOUT_SELL", key, inv, "close_above_invalidation",
             side="SHORT", entry_px=entry_px, inv_cvd=inv_cvd,
-            stale_bars=stale_bars, min_prog=min_prog,
         )
 
     if scenario == "RANGE_BUY" or (side == "LONG" and scenario != "RANGE_SELL"):
@@ -76,7 +75,6 @@ def build_thesis(details: dict, *, price: float = 0) -> dict[str, Any]:
         return _pack(
             scenario or "RANGE_BUY", key, inv, "close_below_invalidation",
             side="LONG", entry_px=entry_px, inv_cvd=inv_cvd,
-            stale_bars=stale_bars, min_prog=min_prog,
         )
 
     key = resistance or break_level
@@ -84,12 +82,11 @@ def build_thesis(details: dict, *, price: float = 0) -> dict[str, Any]:
     return _pack(
         scenario or "RANGE_SELL", key, inv, "close_above_invalidation",
         side="SHORT", entry_px=entry_px, inv_cvd=inv_cvd,
-        stale_bars=stale_bars, min_prog=min_prog,
     )
 
 
 def rebuild_thesis_from_position(pb: dict, side: str, entry_px: float) -> dict[str, Any]:
-    """Restart — senaryo + S/R anchor'dan tez; bar sayisi pos_open_ts'den."""
+    """Restart — senaryo + S/R anchor'dan tez."""
     scenario = str(pb.get("scenario") or "")
     support = float(pb.get("entry_support") or pb.get("active_support") or 0)
     resistance = float(pb.get("entry_resistance") or pb.get("active_resistance") or 0)
@@ -114,15 +111,7 @@ def rebuild_thesis_from_position(pb: dict, side: str, entry_px: float) -> dict[s
         },
         price=entry_px,
     )
-    thesis["bars_elapsed"] = _bars_since_open(thesis)
     return thesis
-
-
-def _bars_since_open(thesis: dict) -> int:
-    opened = float(thesis.get("opened_ts") or state.pos_open_ts or 0)
-    if opened <= 0:
-        return int(thesis.get("bars_elapsed") or 0)
-    return max(0, int((time.time() - opened) / 900))
 
 
 def _level_failed(thesis: dict, close_15m: float) -> bool:
@@ -159,24 +148,6 @@ def _momentum_failed(thesis: dict, close_15m: float, cvd: dict | None) -> bool:
     return False
 
 
-def _stale_failed(thesis: dict, close_15m: float) -> bool:
-    """N x 15m sonra beklenen ilerleme yok."""
-    bars = int(thesis.get("bars_elapsed") or 0)
-    max_bars = int(thesis.get("invalidation_bars") or 8)
-    min_prog = float(thesis.get("min_progress") or 0.003)
-    entry = float(thesis.get("entry_price") or 0)
-    if bars < max_bars or entry <= 0 or close_15m <= 0:
-        return False
-    side = _side_from_scenario(str(thesis.get("scenario") or ""))
-    if side == "LONG":
-        prog = (close_15m - entry) / entry
-        return prog < min_prog
-    if side == "SHORT":
-        prog = (entry - close_15m) / entry
-        return prog < min_prog
-    return False
-
-
 def evaluate_thesis_failure(
     thesis: dict | None,
     close_15m: float,
@@ -193,9 +164,7 @@ def evaluate_thesis_failure(
     if _momentum_failed(thesis, close_15m, cvd):
         return True, "thesis_failed_cvd"
 
-    if _stale_failed(thesis, close_15m):
-        return True, "thesis_failed_stale"
-
+    # Katman 3 (zaman/ilerleme) kaldırıldı — yapısal invalidation yeterli
     return False, ""
 
 
@@ -213,8 +182,6 @@ def _pack(
     side: str,
     entry_px: float,
     inv_cvd: str,
-    stale_bars: int,
-    min_prog: float,
 ) -> dict[str, Any]:
     return {
         "scenario": scenario,
@@ -224,33 +191,25 @@ def _pack(
         "invalidation_price": round(invalidation_price, 2) if invalidation_price > 0 else 0.0,
         "invalidation_condition": condition,
         "invalidation_cvd": inv_cvd,
-        "invalidation_bars": stale_bars,
-        "min_progress": min_prog,
         "opened_ts": time.time(),
-        "bars_elapsed": 0,
     }
 
 
 def _upgrade_thesis(thesis: dict) -> dict[str, Any]:
-    """Eski tek-katmanli tez kaydini tam modele genislet."""
-    if thesis.get("invalidation_cvd") and thesis.get("invalidation_bars"):
-        return thesis
+    """Eski tez kaydini yeni modele genislet."""
     side = _side_from_scenario(
         str(thesis.get("scenario") or ""),
         str(thesis.get("side") or state.pos_side or ""),
     )
-    entry = float(
-        thesis.get("entry_price") or state.pos_entry or 0
-    )
-    stale_bars = int(getattr(cfg, "V3_THESIS_STALE_BARS", 8) or 8)
-    min_prog = float(getattr(cfg, "V3_THESIS_MIN_PROGRESS", 0.003) or 0.003)
+    entry = float(thesis.get("entry_price") or state.pos_entry or 0)
     thesis.setdefault("side", side)
     thesis.setdefault("entry_price", round(entry, 2) if entry > 0 else 0.0)
     thesis.setdefault("invalidation_cvd", "BEAR" if side == "LONG" else "BULL")
-    thesis.setdefault("invalidation_bars", stale_bars)
-    thesis.setdefault("min_progress", min_prog)
     thesis.setdefault("opened_ts", state.pos_open_ts or time.time())
-    thesis.setdefault("bars_elapsed", _bars_since_open(thesis))
+    # Eski zaman alanlarını temizle
+    thesis.pop("invalidation_bars", None)
+    thesis.pop("min_progress", None)
+    thesis.pop("bars_elapsed", None)
     return thesis
 
 
@@ -268,18 +227,11 @@ def ensure_thesis(pb: dict | None = None) -> dict[str, Any]:
     return thesis
 
 
-def _advance_thesis_bar(thesis: dict) -> dict[str, Any]:
-    thesis = dict(thesis)
-    thesis["bars_elapsed"] = int(thesis.get("bars_elapsed") or 0) + 1
-    return thesis
-
-
 def _format_fail_log(thesis: dict, close_15m: float, reason: str, cvd: dict | None) -> str:
     scn = thesis.get("scenario", "?")
     key = float(thesis.get("key_level") or 0)
     inv = float(thesis.get("invalidation_price") or 0)
     entry = float(thesis.get("entry_price") or 0)
-    bars = int(thesis.get("bars_elapsed") or 0)
     cvd = cvd or {}
     if reason == "thesis_failed_level":
         return (
@@ -291,14 +243,11 @@ def _format_fail_log(thesis: dict, close_15m: float, reason: str, cvd: dict | No
             f"Tez bitti [katman=momentum] {scn}: CVD {cvd.get('direction')} teyit=evet "
             f"kapanis {close_15m:.2f} vs giris {entry:.2f}"
         )
-    return (
-        f"Tez bitti [katman=zaman] {scn}: {bars} x 15m ilerleme yetersiz "
-        f"kapanis {close_15m:.2f} giris {entry:.2f} min={float(thesis.get('min_progress') or 0):.2%}"
-    )
+    return f"Tez bitti [{reason}] {scn}: kapanis {close_15m:.2f}"
 
 
 async def check_thesis_on_15m_close(executor, close_15m: float) -> bool:
-    """15m kapanis: 3 katmanli tez kontrolu. True = pozisyon kapandi."""
+    """15m kapanis: 2 katmanli tez kontrolu. True = pozisyon kapandi."""
     if not state.in_position or close_15m <= 0:
         return False
     pb = dict(state.position_breakout or {})
@@ -306,7 +255,6 @@ async def check_thesis_on_15m_close(executor, close_15m: float) -> bool:
         return False
 
     thesis = ensure_thesis(pb)
-    thesis = _advance_thesis_bar(thesis)
     pb["thesis"] = thesis
     state.position_breakout = pb
 

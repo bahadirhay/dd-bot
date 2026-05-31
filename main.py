@@ -2,9 +2,18 @@
 main.py — Ana orkestratör (Windows uyumlu)
 
 Akış: WebSocket veri → trend analizi → otomatik pozisyon (paper/canlı)
+
 Ctrl+C: feed'leri iptal eder ve çıkar (ikinci Ctrl+C zorla kapatır).
+
+Değişiklikler (iyileştirme paketi v1):
+  - load_performance_context: startup'ta SQLite'tan geçmiş performans okunur
+  - DailyLossGuard: günlük %3 kayıp veya 10 işlem limitinde trade engeli
+  - v3_update_safe: V3 güncelleme hatası artık sessiz geçmiyor, state.v3_stale set ediliyor
+  - get_effective_risk: UNCLEAR yapıda azaltılmış risk çarpanı
 """
+
 from __future__ import annotations
+
 import asyncio
 import os
 import signal
@@ -35,13 +44,11 @@ from feeds.rest_market_feed import run as run_rest_market
 from feeds.market_recovery import run as run_market_recovery
 from feeds.liquidation_feed import run as run_liqs
 from feeds.oi_feed import run as run_oi
-
 from engine.structure import add_bar_15m, add_bar_1h
 from engine.cvd_engine import on_bar_close as cvd_on_bar
 from engine.entry_timer import on_1m_bar, set_callback
 from engine.trader import on_15m_market, on_1m_market, execute_entry
 from engine.trend import update_trend
-
 from execution.risk import calculate as calc_risk
 from execution.executor import (
     get_balance,
@@ -60,6 +67,15 @@ from feeds.chart_backfill import (
     backfill_15m_bars,
     backfill_1h_bars,
 )
+
+# ── YENİ: iyileştirme paketi ──────────────────────────────────────────────────
+from botlog.performance_context import load_performance_context
+from botlog.db_backup import maybe_backup
+from core.daily_loss_guard import get_guard
+from core.error_handler import guard as err
+from engine.v3_guard import v3_update_safe, is_v3_stale
+from engine.adaptive_risk import get_effective_risk, liq_filter_ok
+# ─────────────────────────────────────────────────────────────────────────────
 
 log = get_logger("Main")
 
@@ -129,59 +145,73 @@ def _install_signal_handlers():
 
 async def _on_15m(candle: dict):
     from engine.intra_15m import finalize_on_15m_close
+
     add_bar_15m(candle)
     cvd_on_bar(candle)
     await on_15m_market(candle)
     finalize_on_15m_close(candle)
-    try:
-        from dashboard.binance_chart import publish_bot_bars_to_cache
 
+    with err.silent("dashboard 15m yayını"):   # kasıtlı sessiz — dashboard çökmesin
+        from dashboard.binance_chart import publish_bot_bars_to_cache
         publish_bot_bars_to_cache()
-    except Exception:
-        pass
 
 
 async def _on_1h(candle: dict):
     add_bar_1h(candle)
-    if getattr(cfg, "STRATEGY_V3_ENABLED", False):
-        try:
-            from engine.levels_v3 import update_levels
-            from engine.structure_v3 import update_structure
-            from engine.decision_v3 import update_decision
 
-            update_levels()
-            update_structure()
-            update_decision()
-        except Exception as e:
-            log.warning(f"V3 1h guncelleme: {e}")
-    try:
+    if getattr(cfg, "STRATEGY_V3_ENABLED", False):
+        # YENİ: v3_update_safe — hata olursa state.v3_stale=True, işlem engellenir
+        await v3_update_safe("1h")
+
+    with err.warn("journal 1h"):
         from botlog.journal import on_bar
         on_bar("1h", candle, f"yapi 1h={state.structure_1h}")
-    except Exception:
-        pass
 
 
 async def _on_entry_confirmed(details: dict):
+    # YENİ: günlük kayıp limiti kontrolü
+    daily_guard = get_guard()
+    if not daily_guard.can_trade():
+        log.warning("execute_entry: günlük limit → giriş iptal")
+        return
+
+    # YENİ: V3 stale kontrolü
+    if getattr(cfg, "STRATEGY_V3_ENABLED", False) and is_v3_stale():
+        log.warning("execute_entry: V3 stale → giriş iptal")
+        return
+
+    # YENİ: UNCLEAR yapıda azaltılmış risk
+    effective_risk, min_rr = get_effective_risk()
+    details["risk_pct_override"] = effective_risk
+    details["min_rr_override"] = min_rr
+
     if details.get("range_mode"):
         src = "range"
     elif details.get("break_mode"):
         src = "breakout"
     else:
         src = "1m-confirm"
+
     await execute_entry(details, source=src)
+
+    # YENİ: trade açıldı kaydı
+    daily_guard.record_trade_open()
 
 
 async def _on_1m(candle: dict):
     from engine.intra_15m import on_1m_tick
     from engine.bars_1m import add_bar_1m
+
     add_bar_1m(candle)
     on_1m_tick(candle)
+
     if cfg.PULSE_BARS_1M and not is_stopping():
         try:
             update_trend("1m")
         except Exception:
             pass
-    try:
+
+    with err.warn("journal 1m"):
         from botlog.journal import on_bar
         chg = (
             (candle["close"] - candle["open"]) / candle["open"] * 100
@@ -189,11 +219,12 @@ async def _on_1m(candle: dict):
             else 0
         )
         on_bar("1m", candle, f"1m ({chg:+.2f}%) trend={state.trend_view.get('bias', '?')}")
-    except Exception:
-        pass
+
     await on_1m_market(candle)
+
     if getattr(cfg, "ENTRY_MODE", "break").lower() == "confirm":
         await on_1m_bar(candle)
+
     await check_position(_make_exec())
 
 
@@ -230,17 +261,14 @@ async def _account_sync_loop():
     while not is_stopping():
         if is_paper_mode():
             from execution.paper import paper_sync_position
-
             if state.in_position:
                 await paper_sync_position()
             else:
                 from execution.paper import _mark_unrealized
-
                 _mark_unrealized()
         elif cfg.API_KEY:
             try:
                 from execution.account_sync import refresh_account_snapshot
-
                 await refresh_account_snapshot()
             except Exception as e:
                 log.debug(f"Account sync: {e}")
@@ -253,6 +281,7 @@ async def _account_sync_loop():
 
 async def _journal_loop():
     from botlog.journal import maybe_sample_tick
+
     await asyncio.sleep(3)
     while not is_stopping():
         try:
@@ -278,7 +307,6 @@ async def _regime_loop():
             record_metrics_sample()
             if getattr(cfg, "STRATEGY_V3_ENABLED", False):
                 from engine.cvd_v3 import update_cvd_snapshot
-
                 update_cvd_snapshot()
         except Exception as e:
             log.error(f"Trend loop hata: {e}")
@@ -306,6 +334,7 @@ async def _cancel_all(tasks: list[asyncio.Task]) -> None:
 
 async def _main_loop():
     global _active_tasks
+
     reset_stop()
     loop = asyncio.get_running_loop()
     register_loop(loop)
@@ -316,30 +345,43 @@ async def _main_loop():
 
     state.exchange_reconciled = False
     state.startup_grace_until = time.time() + 180
+
     await setup_api()
+
     if cfg.API_KEY and not is_paper_mode():
         from execution.account_sync import reconcile_startup_exchange
-
         await reconcile_startup_exchange()
     else:
         state.exchange_reconciled = True
+
+    # YENİ: geçmiş performansı oku, adaptif parametreleri uygula
+    await load_performance_context()
+
+    # YENİ: günlük kayıp guard'ı başlat
+    daily_guard = get_guard()
+    log.info(
+        f"DailyGuard: max_loss={daily_guard._max_loss_pct}% "
+        f"max_trades={daily_guard._max_trades}"
+    )
+
     n15 = await backfill_15m_bars(96)
     await backfill_1h_bars(48)
     await backfill_price_history()
-    from feeds.trade_feed import bootstrap_cvd_from_rest
 
+    from feeds.trade_feed import bootstrap_cvd_from_rest
     await bootstrap_cvd_from_rest()
+
     if n15:
         from engine.structure import _update_structure_15m, _update_structure_1h
         _update_structure_15m()
         _update_structure_1h()
         update_trend("startup")
+
         if getattr(cfg, "STRATEGY_V3_ENABLED", False):
             from engine.levels_v3 import update_levels
             from engine.structure_v3 import update_structure
             from engine.cvd_v3 import update_cvd_snapshot
             from engine.decision_v3 import update_decision
-
             update_levels()
             update_structure()
             update_cvd_snapshot()
@@ -347,20 +389,20 @@ async def _main_loop():
         else:
             from engine.breakout import refresh_levels
             from engine.breakout_readiness import log_swing_readiness
-
             refresh_levels(force=bool(state.in_position))
             log_swing_readiness("startup")
-            from engine.breakout import get_active_levels
-            from engine.market_narrative import reconcile_startup
-            from core.state import effective_price
 
-            lv = get_active_levels()
-            px = effective_price() or state.mark_price or 0.0
-            reconcile_startup(px, float(lv.get("resistance") or 0), float(lv.get("support") or 0))
-        log.info(
-            f"Yapı güncellendi: 15m={state.structure_15m}  1h={state.structure_1h}"
-        )
+        from engine.breakout import get_active_levels
+        from engine.market_narrative import reconcile_startup
+        from core.state import effective_price
 
+        lv = get_active_levels()
+        px = effective_price() or state.mark_price or 0.0
+        reconcile_startup(px, float(lv.get("resistance") or 0), float(lv.get("support") or 0))
+
+    log.info(
+        f"Yapı güncellendi: 15m={state.structure_15m} 1h={state.structure_1h}"
+    )
     state.startup_grace_until = time.time() + 20
 
     trade_mode = (
@@ -368,81 +410,90 @@ async def _main_loop():
         if is_paper_mode()
         else ("CANLI" if cfg.API_KEY else "İZLEME-auto")
     )
+
     log.info("=" * 56)
-    log.info("  ETH/USDT — Trend + Otomatik Trade Botu")
+    log.info(" ETH/USDT — Trend + Otomatik Trade Botu")
     log.info(
-        f"  Trade   : {trade_mode}  AUTO={cfg.AUTO_TRADE_ENABLED}  "
-        f"mod={cfg.ENTRY_MODE}  impulse1m={cfg.IMPULSE_1M_TRADE}  "
+        f" Trade : {trade_mode} AUTO={cfg.AUTO_TRADE_ENABLED} "
+        f"mod={cfg.ENTRY_MODE} impulse1m={cfg.IMPULSE_1M_TRADE} "
         f"v3={getattr(cfg, 'STRATEGY_V3_ENABLED', False)}"
     )
+
     tm = float(getattr(cfg, "TRADE_MARGIN_USD", 0) or 0)
     if tm > 0:
         log.info(
-            f"  Boyut   : {tm:.0f} USDT marjin × {cfg.LEVERAGE}x "
+            f" Boyut : {tm:.0f} USDT marjin × {cfg.LEVERAGE}x "
             f"(max %{cfg.MAX_MARGIN_PCT:.0f} equity)"
         )
     else:
-        log.info(f"  Boyut   : RISK_PCT={cfg.RISK_PCT}% (SL mesafesine göre)")
+        log.info(f" Boyut : RISK_PCT={cfg.RISK_PCT}% (SL mesafesine göre)")
+
     em = getattr(cfg, "ENTRY_MODE", "break")
     if getattr(cfg, "STRATEGY_V3_ENABLED", False):
         log.info(
-            "  Giris   : V3 — seviye/band zone + CVD + RANGE/BREAKOUT giris + RR>=2.0 "
+            " Giris : V3 — seviye/band zone + CVD + RANGE/BREAKOUT giris + RR>=2.0 "
             "(1h yapi bilgi)"
         )
         log.info(
-            "  Akis    : levels -> structure -> cvd -> scenario -> entry -> decision"
+            " Akis : levels -> structure -> cvd -> scenario -> entry -> decision"
         )
     elif em in ("break", "realtime"):
         log.info(
-            f"  Giriş   : KIRILIM — yapı eşikleri (kanal oranı) "
+            f" Giriş : KIRILIM — yapı eşikleri (kanal oranı) "
             f"+ {cfg.BREAK_HOLD_SEC}s tutma + flow hesap"
         )
         log.info(
-            f"  15m     : sadece seviye | 1h filtre: {state.structure_1h} "
+            f" 15m : sadece seviye | 1h filtre: {state.structure_1h} "
             f"(UNCLEAR→RR≥{cfg.BREAK_MIN_RR_UNCLEAR})"
         )
     elif em == "range":
         log.info(
-            f"  Giriş   : KANAL v2 — bps mesafe + 1m red + CVD eğimi "
+            f" Giriş : KANAL v2 — bps mesafe + 1m red + CVD eğimi "
             f"skor≥{cfg.RANGE_MIN_SCORE} TP1=mid"
         )
         log.info(
-            f"  Kanal   : min genişlik {cfg.RANGE_MIN_WIDTH_BPS}bps  "
+            f" Kanal : min genişlik {cfg.RANGE_MIN_WIDTH_BPS}bps "
             f"R:R≥{cfg.RANGE_MIN_RR}"
         )
     elif em == "hybrid":
         log.info(
-            f"  Giriş   : HİBRİT — band içi RANGE (skor≥{cfg.RANGE_MIN_SCORE}), "
+            f" Giriş : HİBRİT — band içi RANGE (skor≥{cfg.RANGE_MIN_SCORE}), "
             f"dışı KIRILIM"
         )
     else:
-        log.info(f"  Yapı kapısı: 1h+15m (REQUIRE_HTF_ALIGN={cfg.REQUIRE_HTF_ALIGN})")
-        log.info(f"  Trend eşik: güç≥{60} + yapı uyumu")
+        log.info(f" Yapı kapısı: 1h+15m (REQUIRE_HTF_ALIGN={cfg.REQUIRE_HTF_ALIGN})")
+        log.info(f" Trend eşik: güç≥{60} + yapı uyumu")
+
     if getattr(cfg, "NARRATIVE_ENABLED", True):
         log.info(
-            f"  Anlatı  : yapısal hesap (gürültü+swing bacak+hedef oranı, % yok) "
+            f" Anlatı : yapısal hesap (gürültü+swing bacak+hedef oranı, % yok) "
             f"+ {cfg.NARRATIVE_EXTENDED_MIN_BARS}×15m"
         )
+
     log.info(
-        f"  Journal : her {cfg.JOURNAL_SAMPLE_SEC:.0f}s DB  |  "
+        f" Journal : her {cfg.JOURNAL_SAMPLE_SEC:.0f}s DB | "
         f"aciklama: python scripts/explain.py \"2026-05-21 15:00\""
     )
+
     if is_paper_mode():
-        log.info(f"  Bakiye  : ${state.paper_balance:,.2f} USDT (simüle)")
+        log.info(f" Bakiye : ${state.paper_balance:,.2f} USDT (simüle)")
     elif state.api_ok:
-        log.info(f"  API     : OK  ${state.real_balance:.2f} USDT")
+        log.info(f" API : OK ${state.real_balance:.2f} USDT")
+
     market_mode = str(getattr(cfg, "MARKET_DATA_MODE", "aggtrade_ws_rest") or "").lower()
+
     if market_mode == "aggtrade_ws_rest":
-        log.info("  Hesap   : REST account sync + exchange protection orders")
-        log.info("  Veri    : aggTrade WS + REST pollers (book/1m/15m/1h/OI/funding)")
+        log.info(" Hesap : REST account sync + exchange protection orders")
+        log.info(" Veri : aggTrade WS + REST pollers (book/1m/15m/1h/OI/funding)")
         if cfg.API_KEY and not is_paper_mode() and cfg.USER_STREAM_ENABLED:
-            log.info("  User stream: kapali (aggtrade_ws_rest modunda kullanılmıyor)")
+            log.info(" User stream: kapali (aggtrade_ws_rest modunda kullanılmıyor)")
     else:
         if cfg.API_KEY and not is_paper_mode() and cfg.USER_STREAM_ENABLED:
-            log.info("  User stream: SL/TP/borsa kapanışı (listenKey)")
-        log.info("  Veri    : combined WS (1 bağlantı) + REST recovery")
-    log.info(f"  Dashboard: http://localhost:8050")
-    log.info("  Durdurmak: Ctrl+C (takılırsa bir kez daha Ctrl+C)")
+            log.info(" User stream: SL/TP/borsa kapanışı (listenKey)")
+        log.info(" Veri : combined WS (1 bağlantı) + REST recovery")
+
+    log.info(f" Dashboard: http://localhost:8050")
+    log.info(" Durdurmak: Ctrl+C (takılırsa bir kez daha Ctrl+C)")
     log.info("=" * 56)
 
     threading.Thread(target=_start_dashboard, daemon=True).start()
@@ -454,12 +505,14 @@ async def _main_loop():
     rest_market_feed.on_15m_close = _on_15m
     rest_market_feed.on_1h_close = _on_1h
     rest_market_feed.on_1m_close = _on_1m
+
     set_callback(_on_entry_confirmed)
 
     workers = [
         _spawn_worker("recovery", run_market_recovery),
         _spawn_worker("oi", run_oi),
     ]
+
     if market_mode == "aggtrade_ws_rest":
         workers.extend([
             _spawn_worker("aggTrade", run_trade_feed),
@@ -467,10 +520,13 @@ async def _main_loop():
         ])
     else:
         workers.append(_spawn_worker("marketWS", run_combined_market))
-        if bool(getattr(cfg, "LIQ_WS_ENABLED", False)):
-            workers.append(_spawn_worker("liq", run_liqs))
-        if cfg.API_KEY and not is_paper_mode() and cfg.USER_STREAM_ENABLED:
-            workers.append(_spawn_worker("userStream", run_user_stream))
+
+    if bool(getattr(cfg, "LIQ_WS_ENABLED", False)):
+        workers.append(_spawn_worker("liq", run_liqs))
+
+    if cfg.API_KEY and not is_paper_mode() and cfg.USER_STREAM_ENABLED:
+        workers.append(_spawn_worker("userStream", run_user_stream))
+
     workers.extend([
         _spawn_worker("health", run_watchdog),
         _spawn_worker("analyzer", run_scheduled_analysis),
@@ -479,6 +535,7 @@ async def _main_loop():
         _spawn_worker("journal", _journal_loop),
         _spawn_worker("regime", _regime_loop),
     ])
+
     stop_task = asyncio.create_task(wait_stop(), name="stop")
     _active_tasks = workers + [stop_task]
 
@@ -490,7 +547,6 @@ async def _main_loop():
         try:
             from core.futures_public_rest import close_public_rest_session
             from execution.executor import close_api_http_session
-
             await close_public_rest_session()
             await close_api_http_session()
         except Exception:
@@ -505,8 +561,10 @@ def main():
 
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
     acquire()
     _install_signal_handlers()
+
     try:
         asyncio.run(_main_loop())
     except KeyboardInterrupt:

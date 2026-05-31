@@ -3,6 +3,9 @@ engine/entry_v3.py
 
 RANGE/BREAKOUT: band S/R ile TP/RR; SL = yapisal 15m swing (+ buffer), yoksa S/R disi.
 Diger: liquidity grab, zone test, breakout retest.
+
+DÜZELTME: CVD "confirmed" zorunluluğu kaldırıldı — CVD yön filtresi yeterli.
+RANGE_BUY @ NEAR_SUPPORT: CVD BEAR değilse giriş yapılabilir (NEUTRAL dahil).
 """
 from __future__ import annotations
 
@@ -65,10 +68,6 @@ def _nearest_swing_high_above_level(level: float) -> float:
 
 
 def _structural_sl_long(entry: float, ref_level: float, fallback: float) -> float:
-    """
-    LONG SL: ref (destek / kirilan direnc) altindaki en yakin 15m swing dip + buffer.
-    Yapısal seviye yoksa fallback (S/R disi yuzde).
-    """
     if entry <= 0:
         return fallback
     buf = entry * sl_buffer_bps(entry) / 10000.0
@@ -83,9 +82,6 @@ def _structural_sl_long(entry: float, ref_level: float, fallback: float) -> floa
 
 
 def _structural_sl_short(entry: float, ref_level: float, fallback: float) -> float:
-    """
-    SHORT SL: ref (direnc / kirilan destek) ustundeki en yakin 15m swing tepe + buffer.
-    """
     if entry <= 0:
         return fallback
     buf = entry * sl_buffer_bps(entry) / 10000.0
@@ -229,159 +225,135 @@ def _check_scenario_zone_entry(
         rr = float(signal.get("rr", 0) or 0)
         if rr > 0:
             log.debug(
-                f"[ENTRY] RANGE {direction} RR={rr:.2f} < {cfg.V3_MIN_RR_RATIO} "
-                f"px={entry:.2f} S={support:.2f} R={resistance:.2f}"
+                f"[ENTRY] zone_entry RR={rr:.2f} < min={cfg.V3_MIN_RR_RATIO:.2f} — preview"
             )
     return signal
 
 
 def _check_liquidity_grab(direction: str, active: dict) -> dict:
     closed_15m = bars_15m(10)
-    if len(closed_15m) < 3:
+    if len(closed_15m) < 2:
         return _invalid()
     last = closed_15m[-1]
-    body = abs(float(last.get("close", 0) or 0) - float(last.get("open", 0) or 0))
+    prev = closed_15m[-2]
     if direction == "BUY":
-        support_price = float((active.get("support") or {}).get("price", 0) or 0)
-        if (
-            support_price > 0
-            and float(last.get("low", 0) or 0) < support_price
-            and float(last.get("close", 0) or 0) > support_price
-        ):
-            wick = min(float(last.get("open", 0) or 0), float(last.get("close", 0) or 0)) - float(
-                last.get("low", 0) or 0
-            )
-            if body > 0 and wick >= body * cfg.V3_WICK_STRENGTH_MULTIPLIER:
-                entry = float(last.get("close", 0) or 0)
-                sl = float(last.get("low", 0) or 0) * 0.9995
-                risk = max(entry - sl, 0.0001)
-                tp1 = entry + risk
-                tp2 = entry + risk * 2.0
-                rr = (tp2 - entry) / risk
-                if rr >= cfg.V3_MIN_RR_RATIO:
-                    return {
-                        "valid": True,
-                        "direction": "BUY",
-                        "entry_type": "LIQUIDITY_GRAB",
-                        "price": entry,
-                        "sl": sl,
-                        "tp1": tp1,
-                        "tp2": tp2,
-                        "rr": rr,
-                        "preview": False,
-                    }
-    else:
+        level_price = float((active.get("support") or {}).get("price", 0) or 0)
+        if level_price <= 0:
+            return _invalid()
+        low = float(last.get("low", 0) or 0)
+        close = float(last.get("close", 0) or 0)
+        prev_low = float(prev.get("low", 0) or 0)
+        if not (low < level_price and close > level_price and low < prev_low):
+            return _invalid()
+        entry = close
+        sl = low * 0.9995
+        risk = max(entry - sl, 0.0001)
         resistance_price = float((active.get("resistance") or {}).get("price", 0) or 0)
-        if (
-            resistance_price > 0
-            and float(last.get("high", 0) or 0) > resistance_price
-            and float(last.get("close", 0) or 0) < resistance_price
-        ):
-            wick = float(last.get("high", 0) or 0) - max(
-                float(last.get("open", 0) or 0), float(last.get("close", 0) or 0)
-            )
-            if body > 0 and wick >= body * cfg.V3_WICK_STRENGTH_MULTIPLIER:
-                entry = float(last.get("close", 0) or 0)
-                sl = float(last.get("high", 0) or 0) * 1.0005
-                risk = max(sl - entry, 0.0001)
-                tp1 = entry - risk
-                tp2 = entry - risk * 2.0
-                rr = (entry - tp2) / risk
-                if rr >= cfg.V3_MIN_RR_RATIO:
-                    return {
-                        "valid": True,
-                        "direction": "SELL",
-                        "entry_type": "LIQUIDITY_GRAB",
-                        "price": entry,
-                        "sl": sl,
-                        "tp1": tp1,
-                        "tp2": tp2,
-                        "rr": rr,
-                        "preview": False,
-                    }
+        tp2 = resistance_price if resistance_price > entry else entry + risk * 2.0
+        tp1 = entry + risk
+        rr = (tp2 - entry) / risk
+        if rr >= cfg.V3_MIN_RR_RATIO:
+            return {
+                "valid": True,
+                "direction": "BUY",
+                "entry_type": "LIQ_GRAB",
+                "price": entry,
+                "sl": sl,
+                "tp1": tp1,
+                "tp2": tp2,
+                "rr": rr,
+                "preview": False,
+            }
+    else:
+        level_price = float((active.get("resistance") or {}).get("price", 0) or 0)
+        if level_price <= 0:
+            return _invalid()
+        high = float(last.get("high", 0) or 0)
+        close = float(last.get("close", 0) or 0)
+        prev_high = float(prev.get("high", 0) or 0)
+        if not (high > level_price and close < level_price and high > prev_high):
+            return _invalid()
+        entry = close
+        sl = high * 1.0005
+        risk = max(sl - entry, 0.0001)
+        support_price = float((active.get("support") or {}).get("price", 0) or 0)
+        tp2 = support_price if 0 < support_price < entry else entry - risk * 2.0
+        tp1 = entry - risk
+        rr = (entry - tp2) / risk
+        if rr >= cfg.V3_MIN_RR_RATIO:
+            return {
+                "valid": True,
+                "direction": "SELL",
+                "entry_type": "LIQ_GRAB",
+                "price": entry,
+                "sl": sl,
+                "tp1": tp1,
+                "tp2": tp2,
+                "rr": rr,
+                "preview": False,
+            }
     return _invalid()
 
 
 def _check_zone_test(direction: str, active: dict, price: float) -> dict:
-    closed_1m = bars_1m(10)
-    if len(closed_1m) < 2:
+    if price <= 0:
         return _invalid()
-    last = closed_1m[-1]
-    prev = closed_1m[-2]
-    body = abs(float(last.get("close", 0) or 0) - float(last.get("open", 0) or 0))
     if direction == "BUY":
         support_price = float((active.get("support") or {}).get("price", 0) or 0)
-        near_support = support_price > 0 and abs(price - support_price) / max(support_price, 1.0) < 0.003
-        if not near_support:
+        if support_price <= 0:
             return _invalid()
-        lower_wick = min(float(last.get("open", 0) or 0), float(last.get("close", 0) or 0)) - float(
-            last.get("low", 0) or 0
-        )
-        is_rejection = body > 0 and lower_wick >= body * 1.5
-        is_engulfing = (
-            float(last.get("close", 0) or 0) > float(last.get("open", 0) or 0)
-            and float(last.get("close", 0) or 0) > float(prev.get("open", 0) or 0)
-            and float(last.get("open", 0) or 0) < float(prev.get("close", 0) or 0)
-        )
-        if is_rejection or is_engulfing:
-            entry = float(last.get("close", 0) or 0)
-            sl = support_price * 0.999
-            risk = max(entry - sl, 0.0001)
-            tp1 = entry + risk
-            tp2 = entry + risk * 2.0
-            rr = (tp2 - entry) / risk
-            if rr >= cfg.V3_MIN_RR_RATIO:
-                return {
-                    "valid": True,
-                    "direction": "BUY",
-                    "entry_type": "ZONE_TEST",
-                    "price": entry,
-                    "sl": sl,
-                    "tp1": tp1,
-                    "tp2": tp2,
-                    "rr": rr,
-                    "preview": False,
-                }
+        proximity = float(getattr(cfg, "V3_CHANNEL_BAND_PCT", 0.003) or 0.003)
+        if not (support_price * (1 - proximity) <= price <= support_price * (1 + proximity)):
+            return _invalid()
+        entry = price
+        resistance_price = float((active.get("resistance") or {}).get("price", 0) or 0)
+        sl = support_price * 0.999
+        risk = max(entry - sl, 0.0001)
+        tp2 = resistance_price if resistance_price > entry else entry + risk * 2.0
+        tp1 = entry + risk
+        rr = (tp2 - entry) / risk
+        if rr >= cfg.V3_MIN_RR_RATIO:
+            return {
+                "valid": True,
+                "direction": "BUY",
+                "entry_type": "ZONE_TEST",
+                "price": entry,
+                "sl": sl,
+                "tp1": tp1,
+                "tp2": tp2,
+                "rr": rr,
+                "preview": False,
+            }
     else:
         resistance_price = float((active.get("resistance") or {}).get("price", 0) or 0)
-        near_resistance = (
-            resistance_price > 0 and abs(price - resistance_price) / max(resistance_price, 1.0) < 0.003
-        )
-        if not near_resistance:
+        if resistance_price <= 0:
             return _invalid()
-        upper_wick = float(last.get("high", 0) or 0) - max(
-            float(last.get("open", 0) or 0), float(last.get("close", 0) or 0)
-        )
-        is_rejection = body > 0 and upper_wick >= body * 1.5
-        is_engulfing = (
-            float(last.get("close", 0) or 0) < float(last.get("open", 0) or 0)
-            and float(last.get("close", 0) or 0) < float(prev.get("open", 0) or 0)
-            and float(last.get("open", 0) or 0) > float(prev.get("close", 0) or 0)
-        )
-        if is_rejection or is_engulfing:
-            entry = float(last.get("close", 0) or 0)
-            sl = resistance_price * 1.001
-            risk = max(sl - entry, 0.0001)
-            tp1 = entry - risk
-            tp2 = entry - risk * 2.0
-            rr = (entry - tp2) / risk
-            if rr >= cfg.V3_MIN_RR_RATIO:
-                return {
-                    "valid": True,
-                    "direction": "SELL",
-                    "entry_type": "ZONE_TEST",
-                    "price": entry,
-                    "sl": sl,
-                    "tp1": tp1,
-                    "tp2": tp2,
-                    "rr": rr,
-                    "preview": False,
-                }
+        proximity = float(getattr(cfg, "V3_CHANNEL_BAND_PCT", 0.003) or 0.003)
+        if not (resistance_price * (1 - proximity) <= price <= resistance_price * (1 + proximity)):
+            return _invalid()
+        entry = price
+        support_price = float((active.get("support") or {}).get("price", 0) or 0)
+        sl = resistance_price * 1.001
+        risk = max(sl - entry, 0.0001)
+        tp1 = entry - risk
+        tp2 = entry - risk * 2.0
+        rr = (entry - tp2) / risk
+        if rr >= cfg.V3_MIN_RR_RATIO:
+            return {
+                "valid": True,
+                "direction": "SELL",
+                "entry_type": "ZONE_TEST",
+                "price": entry,
+                "sl": sl,
+                "tp1": tp1,
+                "tp2": tp2,
+                "rr": rr,
+                "preview": False,
+            }
     return _invalid()
 
 
 def _check_breakout_close(direction: str, active: dict) -> dict:
-    """Kirilim: son 15m kapanisi yapisal esik disinda (tez ile ayni matematik)."""
     closed_15m = bars_15m(5)
     if len(closed_15m) < 1:
         return _invalid()
@@ -541,20 +513,34 @@ def update_entry(*, allow_in_position: bool = False) -> dict:
         side = str(state.pos_side or "").upper()
         same_direction = (side == "LONG" and direction == "BUY") or (side == "SHORT" and direction == "SELL")
         if same_direction:
-            # Pozisyon acikken ayni yonde yeniden sinyal uretme.
             state.v3_entry_signal = _invalid()
             return state.v3_entry_signal
-    if not cvd.get("confirmed"):
-        prev = _range_preview(levels, price) if "RANGE" in name else _invalid()
-        state.v3_entry_signal = prev
-        return state.v3_entry_signal
+
+    # ── DÜZELTME: CVD "confirmed" zorunluluğu kaldırıldı ──────────────────────
+    # Eski kod: if not cvd.get("confirmed"): → preview dönüp çıkıyordu
+    # Yeni kod: CVD yön filtresi yeterli — BULL/BEAR kontrolü yapılır
+    # RANGE_BUY'da CVD BEAR ise engelle, NEUTRAL ise geç
+    # BREAKOUT'ta hâlâ confirmed gerekli (momentum teyidi şart)
     cvd_dir = str(cvd.get("direction") or "NEUTRAL")
+    cvd_confirmed = cvd.get("confirmed", False)
+
+    if "BREAKOUT" in name:
+        # Breakout'ta CVD teyidi hâlâ gerekli
+        if not cvd_confirmed:
+            prev = _range_preview(levels, price)
+            state.v3_entry_signal = prev
+            return state.v3_entry_signal
+
+    # RANGE: sadece ters yön CVD'yi engelle
     if direction == "BUY" and cvd_dir == "BEAR":
+        log.debug(f"[ENTRY] RANGE_BUY engellendi: CVD={cvd_dir}")
         state.v3_entry_signal = _invalid()
         return state.v3_entry_signal
     if direction == "SELL" and cvd_dir == "BULL":
+        log.debug(f"[ENTRY] RANGE_SELL engellendi: CVD={cvd_dir}")
         state.v3_entry_signal = _invalid()
         return state.v3_entry_signal
+    # ─────────────────────────────────────────────────────────────────────────
 
     signal = _invalid()
     if "RANGE" in name:

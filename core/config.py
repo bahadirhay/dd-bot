@@ -583,6 +583,12 @@ class Config:
     V3_SL_BAND_CLAMP_BUFFER_BPS = float(os.getenv("V3_SL_BAND_CLAMP_BUFFER_BPS", "30"))
     # Min SL mesafe tabanı: SL girişe %X'ten yakınsa giriş geçersiz (gürültü-stop önlemi)
     V3_MIN_SL_DIST_PCT = float(os.getenv("V3_MIN_SL_DIST_PCT", "0.25"))
+    # Yapı skoru kaynağı: "swing" (BOS/CHoCH, anlık) | "collapse" (eski, yapışkan)
+    V3_STRUCTURE_SOURCE = os.getenv("V3_STRUCTURE_SOURCE", "swing")
+    V3_STRUCT_PIVOT_BARS = int(os.getenv("V3_STRUCT_PIVOT_BARS", "60"))
+    V3_STRUCT_PIVOT_LEFT = int(os.getenv("V3_STRUCT_PIVOT_LEFT", "3"))
+    V3_STRUCT_PIVOT_RIGHT = int(os.getenv("V3_STRUCT_PIVOT_RIGHT", "3"))
+    V3_STRUCT_BREAK_BUFFER_BPS = float(os.getenv("V3_STRUCT_BREAK_BUFFER_BPS", "5"))
     # Tradeability / Conviction Gate: skor ne derse desin işlenebilirlik kapısı
     V3_TRADEABILITY_GATE_ENABLED = os.getenv("V3_TRADEABILITY_GATE_ENABLED", "true").lower() in ("1", "true", "yes")
     V3_TRADEABLE_REQUIRE_FLOW_ALIGN = os.getenv("V3_TRADEABLE_REQUIRE_FLOW_ALIGN", "true").lower() in ("1", "true", "yes")

@@ -468,7 +468,326 @@ def _tp_tighter(side: str, new_tp1: float, old_tp1: float) -> bool:
     return new_tp1 < old_tp1
 
 
-async def maybe_adjust_open_tp() -> None:
+def _tp_yakinlastirma_warranted(
+    side: str, entry: float, old_tp1: float, new_tp1: float
+) -> bool:
+    """
+    TP1 yalnizca mevcut hedef yapisal olarak acikca cok uzaksa yaklastirilir.
+    Lokal S/R hedefi (demand/supply, swing) korunur; break_level formulu daha kotu
+    (giriste yakin) onerse mevcut TP1'e dokunulmaz.
+    """
+    pb = dict(state.position_breakout or {})
+    if str(pb.get("entry_mode") or pb.get("strategy") or "") == "v3":
+        return False
+    try:
+        from engine.structure_levels import v3_zone_tp_targets
+
+        z1, _ = v3_zone_tp_targets(side, entry)
+        if z1 > 0 and old_tp1 > 0 and abs(old_tp1 - z1) <= max(2.0, entry * 0.0015):
+            return False
+    except Exception:
+        pass
+    if not _tp_tighter(side, new_tp1, old_tp1):
+        return False
+    if entry <= 0 or old_tp1 <= 0 or new_tp1 <= 0:
+        return False
+
+    from engine.structure_thresholds import tp1_max_distance_bps
+
+    max_bps = float(tp1_max_distance_bps(entry, entry) or 0)
+    old_dist = abs(old_tp1 - entry) / entry * 10000.0
+    new_dist = abs(new_tp1 - entry) / entry * 10000.0
+    min_local = float(getattr(cfg, "BREAK_TP1_LOCAL_MIN_BPS", 60) or 60)
+    overshoot = float(getattr(cfg, "TP_ADJUST_MIN_OVERSHOOT_BPS", 300) or 300)
+    local_ceiling = max(max_bps * 2.0, 250.0)
+
+    if old_dist <= local_ceiling:
+        return False
+    if old_dist < overshoot:
+        return False
+    if new_dist < min_local:
+        return False
+    return True
+
+
+def _infer_damaged_entry_tp1(state: Any) -> float:
+    """
+    Startup yanlis TP1 yakinlastirmasini tespit edip giris anindaki lokal hedefi tahmin et.
+    Imza: mevcut TP ~= break_level*(1-ext) ve giriste cok yakin.
+    """
+    side = (state.pos_side or "").upper()
+    entry = float(state.pos_entry or 0)
+    cur = float(state.pos_tp1 or 0)
+    if entry <= 0 or cur <= 0:
+        return 0.0
+
+    pb = dict(state.position_breakout or {})
+    bl = float(
+        pb.get("break_level")
+        or pb.get("entry_support")
+        or pb.get("active_support")
+        or 0
+    )
+    if bl <= 0:
+        return 0.0
+
+    ext = float(getattr(cfg, "BREAK_TP1_EXTENSION_BPS", 30) or 30) / 10000.0
+
+    if side == "SHORT":
+        bad_sig = round(bl * (1.0 - ext), 2)
+        if abs(cur - bad_sig) > 1.0:
+            return 0.0
+        cur_dist_bps = (entry - cur) / entry * 10000.0
+        if cur_dist_bps > 90:
+            return 0.0
+        try:
+            from core.state import effective_price
+            from engine.levels_v3 import get_levels_snapshot
+
+            px = float(effective_price() or entry)
+            snap = get_levels_snapshot(px) if px > 0 else {}
+            layers = (
+                snap.get("zone_layers")
+                or getattr(state, "v3_zone_layers", None)
+                or {}
+            )
+            for key in ("demand_weak", "demand_liq"):
+                band = layers.get(key) or {}
+                zhi = float(band.get("high") or band.get("zone_high") or 0)
+                if zhi > 0 and zhi < entry:
+                    return round(zhi, 2)
+        except Exception:
+            pass
+        from engine.structure_levels import nearest_swing_below
+
+        sw = nearest_swing_below(entry, state.swing_lows_15m or [])
+        if sw > 0:
+            return round(sw, 2)
+        return 0.0
+
+    bad_sig = round(bl * (1.0 + ext), 2)
+    if abs(cur - bad_sig) > 1.0:
+        return 0.0
+    cur_dist_bps = (cur - entry) / entry * 10000.0
+    if cur_dist_bps > 90:
+        return 0.0
+    try:
+        from core.state import effective_price
+        from engine.levels_v3 import get_levels_snapshot
+
+        px = float(effective_price() or entry)
+        snap = get_levels_snapshot(px) if px > 0 else {}
+        layers = (
+            snap.get("zone_layers")
+            or getattr(state, "v3_zone_layers", None)
+            or {}
+        )
+        for key in ("supply_weak", "supply_mid", "supply_major"):
+            band = layers.get(key) or {}
+            zlo = float(band.get("low") or band.get("zone_low") or 0)
+            if zlo > entry:
+                return round(zlo, 2)
+    except Exception:
+        pass
+    from engine.structure_levels import nearest_swing_above
+
+    sw = nearest_swing_above(entry, state.swing_highs_15m or [])
+    if sw > 0:
+        return round(sw, 2)
+    return 0.0
+
+
+async def maybe_restore_entry_tp1(
+    *, force: bool = False, reason: str = "TP1 giris onarimi"
+) -> None:
+    """Startup yanlis TP1 yakinlastirmasini giris anindaki hedefe geri yukler."""
+    from core.config import is_paper_mode
+
+    if is_paper_mode() or not cfg.API_KEY:
+        return
+    if not state.in_position or state.pos_tp1_hit:
+        return
+
+    import execution.executor as ex
+    from botlog.db import (
+        get_trade_levels,
+        mark_trade_tp1_restored,
+        notes_tp1_restored,
+        parse_tp1_original_from_notes,
+        update_open_trade_tps,
+        update_trade_entry_tp1_original,
+    )
+
+    trade_id = int(getattr(ex, "_trade_id", 0) or 0)
+    lv = get_trade_levels(trade_id) or {}
+    notes = str(lv.get("notes") or "")
+    entry = float(state.pos_entry or 0)
+    cur = float(state.pos_tp1 or 0)
+    side = (state.pos_side or "").upper()
+    if entry <= 0 or cur <= 0:
+        return
+
+    target = parse_tp1_original_from_notes(notes)
+    inferred = False
+    if target <= 0:
+        if notes_tp1_restored(notes):
+            return
+        target = _infer_damaged_entry_tp1(state)
+        inferred = target > 0
+        if target <= 0:
+            return
+
+    algos = await get_open_algo_orders()
+    _, ex_tp1, _, _ = _parse_algo_orders(algos, side)
+    ref = float(ex_tp1 or cur or 0)
+
+    if side == "SHORT":
+        if target >= ref - 0.25 or target >= entry:
+            return
+    elif side == "LONG":
+        if target <= ref + 0.25 or target <= entry:
+            return
+    else:
+        return
+
+    if abs(ref - target) < 0.5:
+        if abs(cur - target) < 0.5:
+            return
+        state.pos_tp1 = target
+        return
+
+    close_side = "SELL" if side == "LONG" else "BUY"
+    mark = await _current_mark()
+    tp2 = float(state.pos_tp2 or 0)
+    tp1_adj, tp2_adj = await resolve_tp_levels(side, entry, target, tp2, mark)
+    if side == "SHORT" and (tp1_adj <= 0 or tp1_adj >= entry):
+        log.warning(f"TP1 onarimi atlandi: SHORT ayarli={tp1_adj:.2f} giris={entry:.2f}")
+        return
+    if side == "LONG" and (tp1_adj <= 0 or tp1_adj <= entry):
+        log.warning(f"TP1 onarimi atlandi: LONG ayarli={tp1_adj:.2f} giris={entry:.2f}")
+        return
+
+    await cancel_all_tp_algos(close_side)
+    await asyncio.sleep(0.25)
+    tp1_id = ""
+    if state.pos_qty_tp1 >= 0.001 and tp1_adj > 0:
+        tp1_id = await place_tp_algo(
+            side, close_side, tp1_adj, state.pos_qty_tp1
+        )
+    if not tp1_id:
+        log.warning("TP1 onarimi basarisiz — emir gonderilemedi")
+        return
+
+    state.pos_tp1 = tp1_adj
+    state.pos_tp2 = tp2_adj
+    state.pos_tp1_id = tp1_id
+    state.pos_tp2_id = ""
+    pb = dict(state.position_breakout or {})
+    if pb:
+        pb["tp1"] = float(tp1_adj)
+        pb["tp2"] = float(tp2_adj)
+        state.position_breakout = pb
+    update_open_trade_tps(trade_id, tp1=tp1_adj, tp2=tp2_adj)
+    update_trade_entry_tp1_original(trade_id, tp1_adj)
+    if inferred:
+        mark_trade_tp1_restored(trade_id)
+    diff_bps = abs(tp1_adj - ref) / entry * 10000.0
+    log.info(
+        f"{reason}: TP1 {ref:.2f} → {tp1_adj:.2f}  "
+        f"(giris hedefi, Δ{diff_bps:.0f}bps)"
+    )
+
+
+async def maybe_refresh_v3_channel_tp1(
+    *, force: bool = False, reason: str = "V3 kanal TP1 guncelleme"
+) -> None:
+    """V3 range: TP1 kanal icinde degilse (demand/band alti) yakin hedefe tasi."""
+    from core.config import is_paper_mode
+    from engine.structure_levels import v3_zone_tp_targets
+
+    if is_paper_mode() or not cfg.API_KEY:
+        return
+    if not state.in_position or state.pos_tp1_hit:
+        return
+    pb = dict(state.position_breakout or {})
+    if str(pb.get("entry_mode") or pb.get("strategy") or "") != "v3":
+        return
+
+    side = (state.pos_side or "").upper()
+    entry = float(state.pos_entry or 0)
+    old_tp1 = float(state.pos_tp1 or 0)
+    if entry <= 0 or old_tp1 <= 0:
+        return
+
+    new_tp1, new_tp2 = v3_zone_tp_targets(side, entry)
+    if new_tp1 <= 0 or new_tp2 <= 0:
+        return
+
+    if side == "SHORT":
+        if new_tp1 >= entry or new_tp1 <= old_tp1:
+            return
+        band_mid = float(pb.get("active_support") or 0)
+        band_top = float(pb.get("active_resistance") or 0)
+        if band_mid > 0 and band_top > band_mid:
+            mid = band_mid + (band_top - band_mid) * 0.5
+            if old_tp1 >= mid:
+                return
+    elif side == "LONG":
+        if new_tp1 <= entry or new_tp1 <= old_tp1:
+            return
+        band_mid = float(pb.get("active_support") or 0)
+        band_top = float(pb.get("active_resistance") or 0)
+        if band_mid > 0 and band_top > band_mid:
+            mid = band_mid + (band_top - band_mid) * 0.5
+            if old_tp1 <= mid:
+                return
+    else:
+        return
+
+    close_side = "SELL" if side == "LONG" else "BUY"
+    mark = await _current_mark()
+    tp1_adj, tp2_adj = await resolve_tp_levels(side, entry, new_tp1, new_tp2, mark)
+    if side == "SHORT" and (tp1_adj <= 0 or tp1_adj >= entry or tp1_adj <= old_tp1):
+        return
+    if side == "LONG" and (tp1_adj <= 0 or tp1_adj <= entry or tp1_adj >= old_tp1):
+        return
+
+    await cancel_all_tp_algos(close_side)
+    await asyncio.sleep(0.25)
+    tp1_id = ""
+    if state.pos_qty_tp1 >= 0.001 and tp1_adj > 0:
+        tp1_id = await place_tp_algo(side, close_side, tp1_adj, state.pos_qty_tp1)
+    if not tp1_id:
+        log.warning("V3 kanal TP1 guncelleme basarisiz — emir yok")
+        return
+
+    state.pos_tp1 = tp1_adj
+    state.pos_tp2 = tp2_adj
+    state.pos_tp1_id = tp1_id
+    state.pos_tp2_id = ""
+    if pb:
+        pb["tp1"] = float(tp1_adj)
+        pb["tp2"] = float(tp2_adj)
+        state.position_breakout = pb
+    try:
+        import execution.executor as ex
+        from botlog.db import update_open_trade_tps
+
+        update_open_trade_tps(
+            int(getattr(ex, "_trade_id", 0) or 0),
+            tp1=tp1_adj,
+            tp2=tp2_adj,
+        )
+    except Exception:
+        pass
+    diff_bps = abs(tp1_adj - old_tp1) / entry * 10000.0
+    log.info(
+        f"{reason}: TP1 {old_tp1:.2f} → {tp1_adj:.2f}  "
+        f"TP2_ref={tp2_adj:.2f} (kanal icinde, Δ{diff_bps:.0f}bps)"
+    )
+
+
+async def maybe_adjust_open_tp(*, force: bool = False, reason: str = "TP yakınlaştırma") -> None:
     """Açık kırılım pozisyonunda TP1 çok uzaksa borsa TP'lerini yakınlaştır."""
     import time
     from core.config import is_paper_mode
@@ -478,9 +797,17 @@ async def maybe_adjust_open_tp() -> None:
         return
     if not state.in_position or state.pos_tp1_hit:
         return
+    pb = dict(state.position_breakout or {})
+    if str(pb.get("entry_mode") or pb.get("strategy") or "") == "v3":
+        if force:
+            log.info(
+                f"TP1 korundu: {float(state.pos_tp1 or 0):.2f} "
+                f"(V3 katman hedefi — breakout yaklastirma atlandi)"
+            )
+        return
     last = float(state.pos_tp_manage_ts or 0)
     cd = float(getattr(cfg, "TP_ADJUST_COOLDOWN_SEC", 120))
-    if (time.time() - last) < cd:
+    if not force and (time.time() - last) < cd:
         return
 
     new_tp1, new_tp2 = recalc_open_position_tps(state)
@@ -488,10 +815,15 @@ async def maybe_adjust_open_tp() -> None:
     entry = float(state.pos_entry or 0)
     if new_tp1 <= 0 or old_tp1 <= 0 or entry <= 0:
         return
-    if not _tp_tighter(state.pos_side, new_tp1, old_tp1):
+    if not _tp_yakinlastirma_warranted(state.pos_side, entry, old_tp1, new_tp1):
+        if force:
+            log.info(
+                f"TP1 korundu: {old_tp1:.2f} (lokal hedef, "
+                f"recalc={new_tp1:.2f} atlandi)"
+            )
         return
     diff_bps = abs(new_tp1 - old_tp1) / entry * 10000.0
-    if diff_bps < 25:
+    if not force and diff_bps < 25:
         return
 
     close_side = "SELL" if state.pos_side == "LONG" else "BUY"
@@ -507,23 +839,35 @@ async def maybe_adjust_open_tp() -> None:
         tp1_id = await place_tp_algo(
             state.pos_side, close_side, tp1_adj, state.pos_qty_tp1
         )
-    send_tp2 = bool(getattr(cfg, "SEND_TP2_ORDER", False))
-    if send_tp2 and state.pos_qty_tp2 >= 0.001 and tp2_adj > 0:
-        tp2_id = await place_tp_algo(
-            state.pos_side, close_side, tp2_adj, state.pos_qty_tp2
-        )
-    if not tp1_id and not tp2_id:
+    # Runner TP2 ile kapatilmaz; kalan parca yalnizca trailing SL ile takip edilir.
+    if not tp1_id:
         log.warning("TP yakınlaştırma başarısız — emir gönderilemedi")
         return
 
     state.pos_tp1 = tp1_adj
     state.pos_tp2 = tp2_adj
     state.pos_tp1_id = tp1_id
-    state.pos_tp2_id = tp2_id
+    state.pos_tp2_id = ""
     state.pos_tp_manage_ts = time.time()
+    pb = dict(state.position_breakout or {})
+    if pb:
+        pb["tp1"] = float(tp1_adj)
+        pb["tp2"] = float(tp2_adj)
+        state.position_breakout = pb
+    try:
+        import execution.executor as ex
+        from botlog.db import update_open_trade_tps
+
+        update_open_trade_tps(
+            int(getattr(ex, "_trade_id", 0) or 0),
+            tp1=tp1_adj,
+            tp2=tp2_adj,
+        )
+    except Exception:
+        pass
     log.info(
-        f"TP yakınlaştırıldı: TP1 {old_tp1:.2f} → {tp1_adj:.2f}  "
-        f"TP2={tp2_adj:.2f}  (Δ{diff_bps:.0f}bps)"
+        f"{reason}: TP1 {old_tp1:.2f} → {tp1_adj:.2f}  "
+        f"runner_ref={tp2_adj:.2f}  (Δ{diff_bps:.0f}bps)"
     )
 
 
@@ -811,6 +1155,13 @@ async def replace_sl_algo(
     if new_id:
         state.pos_sl = new_sl
         state.pos_sl_id = new_id
+        try:
+            import execution.executor as ex
+            from botlog.db import update_open_trade_sl
+
+            update_open_trade_sl(int(getattr(ex, "_trade_id", 0) or 0), new_sl)
+        except Exception:
+            pass
         tag = reason or "güncelleme"
         log.info(f"SL sıkılaştırıldı ({tag}): {old:.2f} → {new_sl:.2f}")
         return True
@@ -853,6 +1204,25 @@ async def manage_position_sl(*, force: bool = False) -> None:
 
     if not state.pos_tp1_hit and not pre_tp1_structural_lock_enabled():
         return
+
+    # ── Breakeven SL kontrolü ─────────────────────────────────────────────────
+    from engine.position_sl import breakeven_sl_triggered, breakeven_sl_price
+
+    if breakeven_sl_triggered(side, entry, mark):
+        be_sl = breakeven_sl_price(side, entry)
+        old_sl = float(state.pos_sl or 0)
+        if be_sl > 0 and _sl_tighter(side, be_sl, old_sl):
+            log.info(
+                f"[BREAKEVEN] SL entry'ye çekildi: {old_sl:.2f} → {be_sl:.2f} "
+                f"(entry={entry:.2f} mark={mark:.2f})"
+            )
+            if await replace_sl_algo(be_sl, "breakeven"):
+                pb = dict(state.position_breakout or {})
+                pb["sl_stage"] = "breakeven"
+                state.position_breakout = pb
+                mark_sl_managed()
+            return
+    # ─────────────────────────────────────────────────────────────────────────
 
     if not in_profit_min_bps(side, entry, mark):
         log.debug(
@@ -970,7 +1340,7 @@ async def place_position_protection(
     tp2: float,
     entry: float = 0.0,
 ) -> tuple[str, str, str, float, float]:
-    """Giriş sonrası SL + TP1 + TP2 (mmbot3). Döner: sl_id, tp1_id, tp2_id, tp1_adj, tp2_adj."""
+    """Giriş sonrası yalnızca SL + TP1 gönderilir; TP2 runner referansıdır."""
     close_side = "SELL" if direction == "LONG" else "BUY"
     sl_id = await place_sl_algo(close_side, sl) if sl > 0 else ""
     mark = await _current_mark()
@@ -980,9 +1350,6 @@ async def place_position_protection(
     tp2_id = ""
     if qty_tp1 >= 0.001 and tp1_adj > 0:
         tp1_id = await place_tp_algo(direction, close_side, tp1_adj, qty_tp1)
-    send_tp2 = bool(getattr(cfg, "SEND_TP2_ORDER", False))
-    if send_tp2 and qty_tp2 >= 0.001 and tp2_adj > 0:
-        tp2_id = await place_tp_algo(direction, close_side, tp2_adj, qty_tp2)
     return sl_id, tp1_id, tp2_id, tp1_adj, tp2_adj
 
 
@@ -996,7 +1363,9 @@ async def _fill_missing_levels() -> None:
     if state.pos_sl > 0 and state.pos_tp1 > 0:
         if pb.get("break_mode") or pb.get("break_level"):
             n1, n2 = recalc_open_position_tps(state)
-            if n1 > 0 and _tp_tighter(state.pos_side, n1, state.pos_tp1):
+            if n1 > 0 and _tp_yakinlastirma_warranted(
+                state.pos_side, float(state.pos_entry or 0), state.pos_tp1, n1
+            ):
                 state.pos_tp1 = n1
                 if n2 > 0:
                     state.pos_tp2 = n2
@@ -1050,6 +1419,7 @@ async def _ensure_protection_orders_impl() -> bool:
     if state.pos_sl <= 0 and state.pos_tp1 <= 0:
         log.warning("Koruma emri yok — SL/TP hesaplanamadı")
         return False
+    target_state_sl = float(state.pos_sl or 0)
 
     ex_qty = await get_position_qty()
     if ex_qty >= 0.001:
@@ -1061,6 +1431,14 @@ async def _ensure_protection_orders_impl() -> bool:
     sl, tp1, tp2, _ = _parse_algo_orders(algos, state.pos_side)
     close_side = "SELL" if state.pos_side == "LONG" else "BUY"
 
+    if tp2 > 0 and not bool(getattr(cfg, "SEND_TP2_ORDER", False)):
+        log.warning("TP2 emri bulundu — runner SL kurgusu için TP emirleri yenileniyor")
+        await cancel_all_tp_algos(close_side)
+        state.pos_tp1_id = ""
+        state.pos_tp2_id = ""
+        tp1 = 0.0
+        tp2 = 0.0
+
     if state.pos_tp1_hit:
         if tp1 > 0 or tp2 > 0:
             log.warning("TP1 alinmis — borsadaki TP emirleri iptal ediliyor")
@@ -1068,15 +1446,27 @@ async def _ensure_protection_orders_impl() -> bool:
             state.pos_tp1_id = ""
             state.pos_tp2_id = ""
         has_sl = sl > 0 or bool(state.pos_sl_id)
+        if sl > 0 and target_state_sl > 0 and abs(sl - target_state_sl) >= 0.5:
+            log.warning(
+                f"Exchange SL state ile uyumsuz — restore replace: "
+                f"exchange={sl:.2f} hedef={target_state_sl:.2f}"
+            )
+            await replace_sl_algo(target_state_sl, "restore SL sync", force=True)
+            return bool(state.pos_sl_id)
         if not has_sl and state.pos_sl > 0:
             log.warning("TP1 sonrasi SL eksik — yeniden gonderiliyor")
-            state.pos_sl_id = await place_sl_algo(close_side, state.pos_sl)
+            state.pos_sl_id = await place_sl_algo(close_side, target_state_sl or state.pos_sl)
         return bool(state.pos_sl_id or sl > 0)
 
     has_sl = sl > 0
-    has_tp = tp1 > 0 or (
-        tp2 > 0 and bool(getattr(cfg, "SEND_TP2_ORDER", False))
-    )
+    has_tp = tp1 > 0
+    if has_sl and target_state_sl > 0 and abs(sl - target_state_sl) >= 0.5:
+        log.warning(
+            f"Exchange SL state ile uyumsuz — restore replace: "
+            f"exchange={sl:.2f} hedef={target_state_sl:.2f}"
+        )
+        await replace_sl_algo(target_state_sl, "restore SL sync", force=True)
+        return bool(state.pos_sl_id)
     if has_sl and (has_tp or state.pos_tp1 <= 0):
         return True
 
@@ -1084,7 +1474,7 @@ async def _ensure_protection_orders_impl() -> bool:
         f"Koruma emirleri eksik (algo SL={has_sl} TP={has_tp}) — yeniden gönderiliyor"
     )
     if not has_sl and state.pos_sl > 0:
-        state.pos_sl_id = await place_sl_algo(close_side, state.pos_sl)
+        state.pos_sl_id = await place_sl_algo(close_side, target_state_sl or state.pos_sl)
     if not has_tp and state.pos_tp1 > 0 and not state.pos_tp1_hit:
         mark = await _current_mark()
         tp1_adj, tp2_adj = await resolve_tp_levels(
@@ -1099,9 +1489,5 @@ async def _ensure_protection_orders_impl() -> bool:
         state.pos_tp1_id = await place_tp_algo(
             state.pos_side, close_side, tp1_adj, state.pos_qty_tp1
         )
-        send_tp2 = bool(getattr(cfg, "SEND_TP2_ORDER", False))
-        if send_tp2 and tp2_adj > 0 and state.pos_qty_tp2 >= 0.001:
-            state.pos_tp2_id = await place_tp_algo(
-                state.pos_side, close_side, tp2_adj, state.pos_qty_tp2
-            )
+        state.pos_tp2_id = ""
     return bool(state.pos_sl_id or state.pos_tp1_id)

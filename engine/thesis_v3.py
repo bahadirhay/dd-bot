@@ -2,12 +2,12 @@
 engine/thesis_v3.py — Pozisyon = tez (2 katman).
 
 Katman 1 — Seviye: 15m kapanis yapısal invalidation disinda
-Katman 2 — Momentum: CVD ters yon + confirmed + fiyat giris disinda
+ Katman 2 — Momentum: CVD ters yon + confirmed + fiyat giris disinda (varsayilan: bilgi)
 
 DÜZELTME: Katman 3 (zaman/ilerleme) KALDIRILDI.
 Zaman ve oran bazlı eşik yerine yapısal hesaplama kullanılır:
 - Fiyat invalidation seviyesini kırdıysa çık
-- CVD güçlü ters yöndeyse ve fiyat giriş altındaysa çık
+- CVD güçlü ters yöndeyse tek basina cikma; ters tez/SL yapisi beklenir
 - Bunların hiçbiri olmadığı sürece pozisyon açık kalır
 """
 from __future__ import annotations
@@ -35,6 +35,21 @@ def _side_from_scenario(scenario: str, direction: str = "") -> str:
     return str(state.pos_side or "").upper()
 
 
+def _planned_invalidation(details: dict, side: str, entry_px: float) -> float:
+    """Entry planindaki gercek SL, pozisyon tezinin invalidation seviyesidir."""
+    try:
+        sl = float(details.get("sl") or 0)
+    except (TypeError, ValueError):
+        sl = 0.0
+    if sl <= 0 or entry_px <= 0:
+        return 0.0
+    if side == "LONG" and sl < entry_px:
+        return sl
+    if side == "SHORT" and sl > entry_px:
+        return sl
+    return 0.0
+
+
 def build_thesis(details: dict, *, price: float = 0) -> dict[str, Any]:
     """Pozisyon acilirken tez — seviye + momentum katmanlari."""
     scenario = str(details.get("v3_scenario") or details.get("scenario") or "")
@@ -53,17 +68,18 @@ def build_thesis(details: dict, *, price: float = 0) -> dict[str, Any]:
     )
     side = _side_from_scenario(scenario, direction)
     inv_cvd = "BEAR" if side == "LONG" else "BULL"
+    planned_inv = _planned_invalidation(details, side, entry_px)
 
     if scenario.startswith("BREAKOUT_") or "BREAKOUT" in scenario:
         if side == "LONG" or "BUY" in scenario:
             key = break_level or resistance
-            inv = break_threshold_price(key, "SHORT", entry_px) if key > 0 else 0.0
+            inv = planned_inv or (break_threshold_price(key, "SHORT", entry_px) if key > 0 else 0.0)
             return _pack(
                 "BREAKOUT_BUY", key, inv, "close_below_invalidation",
                 side="LONG", entry_px=entry_px, inv_cvd=inv_cvd,
             )
         key = break_level or support
-        inv = break_threshold_price(key, "LONG", entry_px) if key > 0 else 0.0
+        inv = planned_inv or (break_threshold_price(key, "LONG", entry_px) if key > 0 else 0.0)
         return _pack(
             "BREAKOUT_SELL", key, inv, "close_above_invalidation",
             side="SHORT", entry_px=entry_px, inv_cvd=inv_cvd,
@@ -71,14 +87,14 @@ def build_thesis(details: dict, *, price: float = 0) -> dict[str, Any]:
 
     if scenario == "RANGE_BUY" or (side == "LONG" and scenario != "RANGE_SELL"):
         key = support or break_level
-        inv = break_threshold_price(key, "SHORT", entry_px) if key > 0 else 0.0
+        inv = planned_inv or (break_threshold_price(key, "SHORT", entry_px) if key > 0 else 0.0)
         return _pack(
             scenario or "RANGE_BUY", key, inv, "close_below_invalidation",
             side="LONG", entry_px=entry_px, inv_cvd=inv_cvd,
         )
 
     key = resistance or break_level
-    inv = break_threshold_price(key, "LONG", entry_px) if key > 0 else 0.0
+    inv = planned_inv or (break_threshold_price(key, "LONG", entry_px) if key > 0 else 0.0)
     return _pack(
         scenario or "RANGE_SELL", key, inv, "close_above_invalidation",
         side="SHORT", entry_px=entry_px, inv_cvd=inv_cvd,
@@ -107,6 +123,7 @@ def rebuild_thesis_from_position(pb: dict, side: str, entry_px: float) -> dict[s
             "v3_support": support,
             "v3_resistance": resistance,
             "break_level": break_level,
+            "sl": state.pos_sl,
             "price": entry_px,
         },
         price=entry_px,
@@ -116,13 +133,21 @@ def rebuild_thesis_from_position(pb: dict, side: str, entry_px: float) -> dict[s
 
 def _level_failed(thesis: dict, close_15m: float) -> bool:
     inv = float(thesis.get("invalidation_price") or 0)
-    if inv <= 0 or close_15m <= 0:
+    key = float(thesis.get("key_level") or 0)
+    if close_15m <= 0:
         return False
     cond = str(thesis.get("invalidation_condition") or "")
-    if cond in ("close_below_invalidation", "close_below_key_level"):
-        return close_15m < inv
-    if cond in ("close_above_invalidation", "close_above_key_level"):
-        return close_15m > inv
+    if cond == "close_below_key_level":
+        # key_level kırılımı: hem key seviyesi hem de invalidation kontrol edilir
+        check = key if key > 0 else inv
+        return check > 0 and close_15m < check
+    if cond == "close_above_key_level":
+        check = key if key > 0 else inv
+        return check > 0 and close_15m > check
+    if cond == "close_below_invalidation":
+        return inv > 0 and close_15m < inv
+    if cond == "close_above_invalidation":
+        return inv > 0 and close_15m > inv
     return False
 
 
@@ -161,7 +186,9 @@ def evaluate_thesis_failure(
     if _level_failed(thesis, close_15m):
         return True, "thesis_failed_level"
 
-    if _momentum_failed(thesis, close_15m, cvd):
+    if bool(getattr(cfg, "V3_THESIS_CVD_EXIT_ENABLED", False)) and _momentum_failed(
+        thesis, close_15m, cvd
+    ):
         return True, "thesis_failed_cvd"
 
     # Katman 3 (zaman/ilerleme) kaldırıldı — yapısal invalidation yeterli

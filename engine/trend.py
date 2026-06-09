@@ -148,8 +148,14 @@ def update_trend(trigger: str = "tick") -> dict:
         serial_down = True
 
     # ── Yapı ─────────────────────────────────────────────────
+    # Tam uyum: her iki TF aynı yönde
     struct_down = s15 == "DOWN" and s1h == "DOWN"
     struct_up = s15 == "UP" and s1h == "UP"
+    # Yumuşatılmış uyum: 1h UNCLEAR (belirsiz) ise 15m'e izin ver
+    # UNCLEAR = zıt yönde değil, sadece net sinyal yok
+    s1h_unclear = s1h not in ("UP", "DOWN")
+    struct_down_soft = s15 == "DOWN" and (s1h == "DOWN" or s1h_unclear)
+    struct_up_soft = s15 == "UP" and (s1h == "UP" or s1h_unclear)
     struct_weak_down = s15 == "DOWN"
     struct_weak_up = s15 == "UP"
 
@@ -239,15 +245,26 @@ def update_trend(trigger: str = "tick") -> dict:
     structure_aligned = (
         (bias == "DOWN" and struct_down) or (bias == "UP" and struct_up)
     )
+    # Soft alignment: 1h UNCLEAR ise 15m yeterli (strength ≥ 60 şartıyla)
+    structure_soft_aligned = (
+        (bias == "DOWN" and struct_down_soft) or (bias == "UP" and struct_up_soft)
+    )
     flow_ok = strength >= STRENGTH_TRADE and bias in ("UP", "DOWN")
     if cfg.REQUIRE_HTF_ALIGN:
-        trade_ok = flow_ok and structure_aligned
+        # Tam uyum veya (soft uyum + yüksek güç ≥ 60)
+        trade_ok = flow_ok and (
+            structure_aligned
+            or (structure_soft_aligned and strength >= 60)
+        )
     else:
         trade_ok = flow_ok
 
     block = ""
     if flow_ok and not structure_aligned and cfg.REQUIRE_HTF_ALIGN:
-        block = f" | 1h+15m uyumsuz ({s15}/{s1h}) — 15m tek basina trade yok"
+        if structure_soft_aligned and strength >= 60:
+            block = f" | 1h UNCLEAR ama 15m güçlü ({s15}/güç={strength:.0f}) — soft izin"
+        else:
+            block = f" | 1h+15m uyumsuz ({s15}/{s1h}) — 15m tek basina trade yok"
 
     summary = _make_summary(bias, phase, strength, f_chg, s15, s1h, trigger) + block
 

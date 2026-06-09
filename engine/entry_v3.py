@@ -95,15 +95,104 @@ def _structural_sl_short(entry: float, ref_level: float, fallback: float) -> flo
     return fallback
 
 
+def _calc_score_short_below_support(
+    entry: float,
+    support: float,
+    resistance: float,
+) -> dict | None:
+    """
+    Skor SHORT: giris destek ustunde/yaninda — TP destek cizgisinde degil, ALTINDA.
+    (Range SELL tp2=support yalnizca entry > support icin kucuk RR uretir.)
+    """
+    if entry <= 0 or support <= 0:
+        return None
+    r = resistance if resistance > support else support + max(entry * 0.015, 8.0)
+    breath = entry * sl_buffer_bps(entry) / 10000.0
+    band_w = max(r - support, breath * 3.0)
+    ext_frac = float(getattr(cfg, "V3_SCORE_SHORT_TP_BAND_FRAC", 0.12) or 0.12)
+    ext = max(breath * 1.25, band_w * ext_frac)
+    tp2 = support - ext
+    if tp2 >= entry - breath * 0.5:
+        tp2 = entry - max(breath, entry * 0.0015)
+    sl_frac = float(getattr(cfg, "V3_SCORE_SHORT_SL_BAND_FRAC", 0.035) or 0.035)
+    reclaim_buffer = max(breath * 1.25, band_w * sl_frac)
+    local_sl = support + reclaim_buffer
+    if local_sl <= entry:
+        local_sl = entry + max(breath, entry * 0.0008)
+    # Score short invalidation is broken-support reclaim, not the far range resistance.
+    sl = local_sl
+    risk = max(sl - entry, 0.0001)
+    reward = max(entry - tp2, 0.0001)
+    tp1 = entry - risk * 0.5
+    return {
+        "direction": "SELL",
+        "price": entry,
+        "sl": sl,
+        "tp1": tp1,
+        "tp2": tp2,
+        "rr": reward / risk,
+    }
+
+
+def _calc_score_long_above_resistance(
+    entry: float,
+    support: float,
+    resistance: float,
+) -> dict | None:
+    """Skor LONG: giris direnc altinda — TP direnc USTUNDE."""
+    if entry <= 0 or resistance <= 0:
+        return None
+    s = support if support < resistance else resistance - max(entry * 0.015, 8.0)
+    breath = entry * sl_buffer_bps(entry) / 10000.0
+    band_w = max(resistance - s, breath * 3.0)
+    ext_frac = float(getattr(cfg, "V3_SCORE_LONG_TP_BAND_FRAC", 0.12) or 0.12)
+    ext = max(breath * 1.25, band_w * ext_frac)
+    tp2 = resistance + ext
+    if tp2 <= entry + breath * 0.5:
+        tp2 = entry + max(breath, entry * 0.0015)
+    sl_frac = float(getattr(cfg, "V3_SCORE_SHORT_SL_BAND_FRAC", 0.035) or 0.035)
+    reclaim_buffer = max(breath * 1.25, band_w * sl_frac)
+    local_sl = resistance - reclaim_buffer
+    if local_sl >= entry:
+        local_sl = entry - max(breath, entry * 0.0008)
+    # Score long invalidation is broken-resistance reclaim, not the far range support.
+    sl = local_sl
+    risk = max(entry - sl, 0.0001)
+    reward = max(tp2 - entry, 0.0001)
+    tp1 = entry + risk * 0.5
+    return {
+        "direction": "BUY",
+        "price": entry,
+        "sl": sl,
+        "tp1": tp1,
+        "tp2": tp2,
+        "rr": reward / risk,
+    }
+
+
 def _calc_range_sell(entry: float, support: float, resistance: float) -> dict | None:
     if entry <= 0 or support <= 0 or resistance <= support or entry <= support:
         return None
+    from engine.v3_common import range_channel_tp_ladder
+
     fallback_sl = max(resistance * 1.001, entry * 1.0002)
     sl = _structural_sl_short(entry, resistance, fallback_sl)
-    tp2 = support
+    levels = getattr(state, "v3_zone_layers", None) or {}
+    tp1, tp2 = range_channel_tp_ladder(
+        "SHORT",
+        entry,
+        support,
+        resistance,
+        levels={"zone_layers": levels},
+        swing_lows=state.swing_lows_15m or [],
+    )
+    if tp1 <= 0 or tp2 <= 0 or tp1 >= entry or tp2 >= tp1:
+        tp2 = support
+        risk = max(sl - entry, 0.0001)
+        tp1 = entry - risk
     risk = max(sl - entry, 0.0001)
-    tp1 = entry - risk
-    rr = (entry - tp2) / risk
+    reward = max(entry - tp2, 0.0001)
+    rr = reward / risk
     return {
         "direction": "SELL",
         "price": entry,
@@ -117,12 +206,26 @@ def _calc_range_sell(entry: float, support: float, resistance: float) -> dict | 
 def _calc_range_buy(entry: float, support: float, resistance: float) -> dict | None:
     if entry <= 0 or support <= 0 or resistance <= support or entry >= resistance:
         return None
+    from engine.v3_common import range_channel_tp_ladder
+
     fallback_sl = min(support * 0.999, entry * 0.9998)
     sl = _structural_sl_long(entry, support, fallback_sl)
-    tp2 = resistance
+    levels = getattr(state, "v3_zone_layers", None) or {}
+    tp1, tp2 = range_channel_tp_ladder(
+        "LONG",
+        entry,
+        support,
+        resistance,
+        levels={"zone_layers": levels},
+        swing_highs=state.swing_highs_15m or [],
+    )
+    if tp1 <= 0 or tp2 <= 0 or tp1 <= entry or tp2 <= tp1:
+        tp2 = resistance
+        risk = max(entry - sl, 0.0001)
+        tp1 = entry + risk
     risk = max(entry - sl, 0.0001)
-    tp1 = entry + risk
-    rr = (tp2 - entry) / risk
+    reward = max(tp2 - entry, 0.0001)
+    rr = reward / risk
     return {
         "direction": "BUY",
         "price": entry,
@@ -199,6 +302,35 @@ def _range_preview(levels: dict, price: float) -> dict:
                 rr=calc["rr"],
             )
     return _invalid()
+
+
+def _try_channel_zone_entry(
+    levels: dict, price: float, zone: str, cvd: dict | None
+) -> dict:
+    """Senaryo WAIT olsa bile kanal traverse + range valid ise kenar girisi."""
+    if not getattr(cfg, "V3_CHANNEL_ENTRY_ENABLED", True):
+        return _invalid()
+    if not levels.get("channel_traversed"):
+        return _invalid()
+    if zone == "NEAR_RESISTANCE":
+        order_side, direction = "SHORT", "SELL"
+    elif zone == "NEAR_SUPPORT":
+        order_side, direction = "LONG", "BUY"
+    else:
+        return _invalid()
+
+    from engine.range_validation_v3 import clean_range_scenario, validate_range_trade
+
+    range_check = validate_range_trade(
+        order_side,
+        levels=levels,
+        scenario=clean_range_scenario({}, order_side),
+        cvd=cvd,
+        px=price,
+    )
+    if not range_check.get("valid"):
+        return _invalid()
+    return _check_scenario_zone_entry(direction, levels, price, zone)
 
 
 def _check_scenario_zone_entry(
@@ -505,8 +637,26 @@ def update_entry(*, allow_in_position: bool = False) -> dict:
     )
 
     if name not in trade_names:
+        channel_sig = _try_channel_zone_entry(levels, price, zone, cvd)
+        if channel_sig.get("valid"):
+            state.v3_entry_signal = channel_sig
+            return state.v3_entry_signal
         state.v3_entry_signal = _range_preview(levels, price)
         return state.v3_entry_signal
+
+    if getattr(cfg, "V3_EXEC_WINDOW_GATE_ENTRY", True) and not getattr(
+        cfg, "V3_SCORE_DECISION_ENABLED", True
+    ):
+        from engine.market_state_v3 import get_market_state
+        from engine.trade_verdict_v3 import trade_entry_allowed
+
+        ms = get_market_state()
+        direction = "BUY" if "BUY" in name else "SELL"
+        ok_t, tmsg = trade_entry_allowed(ms, name, direction)
+        if not ok_t:
+            log.debug(f"[ENTRY] verdict: {tmsg}")
+            state.v3_entry_signal = _invalid(stale_execution=True)
+            return state.v3_entry_signal
 
     direction = "BUY" if "BUY" in name else "SELL"
     if state.in_position and allow_in_position:
@@ -524,22 +674,21 @@ def update_entry(*, allow_in_position: bool = False) -> dict:
     cvd_dir = str(cvd.get("direction") or "NEUTRAL")
     cvd_confirmed = cvd.get("confirmed", False)
 
-    if "BREAKOUT" in name:
-        # Breakout'ta CVD teyidi hâlâ gerekli
-        if not cvd_confirmed:
-            prev = _range_preview(levels, price)
-            state.v3_entry_signal = prev
-            return state.v3_entry_signal
+    if not getattr(cfg, "V3_SCORE_DECISION_ENABLED", True):
+        if "BREAKOUT" in name:
+            if not cvd_confirmed:
+                prev = _range_preview(levels, price)
+                state.v3_entry_signal = prev
+                return state.v3_entry_signal
 
-    # RANGE: sadece ters yön CVD'yi engelle
-    if direction == "BUY" and cvd_dir == "BEAR":
-        log.debug(f"[ENTRY] RANGE_BUY engellendi: CVD={cvd_dir}")
-        state.v3_entry_signal = _invalid()
-        return state.v3_entry_signal
-    if direction == "SELL" and cvd_dir == "BULL":
-        log.debug(f"[ENTRY] RANGE_SELL engellendi: CVD={cvd_dir}")
-        state.v3_entry_signal = _invalid()
-        return state.v3_entry_signal
+        if direction == "BUY" and cvd_dir == "BEAR":
+            log.debug(f"[ENTRY] RANGE_BUY engellendi: CVD={cvd_dir}")
+            state.v3_entry_signal = _invalid()
+            return state.v3_entry_signal
+        if direction == "SELL" and cvd_dir == "BULL":
+            log.debug(f"[ENTRY] RANGE_SELL engellendi: CVD={cvd_dir}")
+            state.v3_entry_signal = _invalid()
+            return state.v3_entry_signal
     # ─────────────────────────────────────────────────────────────────────────
 
     signal = _invalid()
@@ -573,6 +722,164 @@ def update_entry(*, allow_in_position: bool = False) -> dict:
 
     state.v3_entry_signal = signal if signal else _invalid()
     return state.v3_entry_signal
+
+
+def build_entry_for_score_side(
+    side: str,
+    levels: dict,
+    price: float,
+    scenario: dict | None = None,
+) -> dict:
+    """
+    Skor tabanli karar: yon secildikten sonra giris (CVD/verdict veto yok).
+    TREND_CONTINUATION: kirilmis destek/direnc referansi ile RR.
+    """
+    direction = "BUY" if str(side).upper() in ("LONG", "BUY") else "SELL"
+    s, r = _band_prices(levels)
+    sc = scenario or {}
+    ref_s = float(sc.get("ref_support") or levels.get("active_support") or s or 0)
+    ref_r = float(sc.get("ref_resistance") or levels.get("active_resistance") or r or 0)
+    mode = str(levels.get("decision_mode") or "")
+    entry = price if price > 0 else float(state.mark_price or state.price or 0)
+
+    if mode == "TREND_CONTINUATION" or (ref_s <= 0 and ref_r <= ref_s):
+        if direction == "SELL":
+            sup = ref_s or s
+            res = ref_r if ref_r > sup else sup + max(entry * 0.015, 8.0)
+            calc = _calc_score_short_below_support(entry, sup, res)
+            if calc:
+                rr = float(calc["rr"])
+                sig = {
+                    "valid": rr >= cfg.V3_MIN_RR_RATIO,
+                    "direction": "SELL",
+                    "entry_type": "TREND_CONTINUATION",
+                    "price": calc["price"],
+                    "sl": calc["sl"],
+                    "tp1": calc["tp1"],
+                    "tp2": calc["tp2"],
+                    "rr": rr,
+                    "preview": False,
+                }
+            else:
+                sig = _invalid()
+        else:
+            res = ref_r or r
+            sup = ref_s if ref_s < res else res - max(entry * 0.015, 8.0)
+            calc = _calc_score_long_above_resistance(entry, sup, res)
+            if calc:
+                rr = float(calc["rr"])
+                sig = {
+                    "valid": rr >= cfg.V3_MIN_RR_RATIO,
+                    "direction": "BUY",
+                    "entry_type": "TREND_CONTINUATION",
+                    "price": calc["price"],
+                    "sl": calc["sl"],
+                    "tp1": calc["tp1"],
+                    "tp2": calc["tp2"],
+                    "rr": rr,
+                    "preview": False,
+                }
+            else:
+                sig = _invalid()
+        if sig.get("valid") or float(sig.get("rr", 0) or 0) > 0:
+            return sig
+        return _range_preview(levels, entry)
+
+    zone = str(levels.get("zone") or zone_for_price(s, r, entry))
+    if direction == "SELL":
+        sig = _invalid()
+        if s > 0 and entry >= s * 0.9995:
+            calc = _calc_score_short_below_support(entry, s, r)
+            if calc:
+                rr = float(calc["rr"])
+                sig = {
+                    "valid": rr >= cfg.V3_MIN_RR_RATIO,
+                    "direction": "SELL",
+                    "entry_type": "SCORE_SHORT_BELOW_S",
+                    "price": calc["price"],
+                    "sl": calc["sl"],
+                    "tp1": calc["tp1"],
+                    "tp2": calc["tp2"],
+                    "rr": rr,
+                    "preview": False,
+                }
+        # Broken-support SHORT: fiyat destek altinda ama çok fazla değil (<%3)
+        # SL = destek + buffer, TP = band genişliğinin oransal uzantısı
+        if float(sig.get("rr", 0) or 0) <= 0 and s > 0 and 0 < entry < s:
+            breath = entry * sl_buffer_bps(entry) / 10000.0
+            band_w = max(r - s, breath * 4) if r > s else max(entry * 0.015, 8.0)
+            broken_sl = s + max(breath * 2.0, band_w * 0.04)
+            broken_tp2 = entry - max(breath * 2.0, band_w * 0.15)
+            risk = max(broken_sl - entry, 0.0001)
+            reward = max(entry - broken_tp2, 0.0001)
+            broken_rr = reward / risk
+            if broken_sl > entry and broken_tp2 < entry and broken_rr >= 1.0:
+                sig = {
+                    "valid": broken_rr >= cfg.V3_MIN_RR_RATIO,
+                    "direction": "SELL",
+                    "entry_type": "BROKEN_SUPPORT_SHORT",
+                    "price": entry,
+                    "sl": round(broken_sl, 2),
+                    "tp1": round(entry - risk, 2),
+                    "tp2": round(broken_tp2, 2),
+                    "rr": broken_rr,
+                    "preview": False,
+                }
+        if float(sig.get("rr", 0) or 0) <= 0:
+            sig = _check_scenario_zone_entry("SELL", levels, entry, zone)
+        if float(sig.get("rr", 0) or 0) <= 0:
+            sig = _build_range_entry(
+                "SELL", entry, s, r, entry_type="SCORE_SELL", require_min_rr=False
+            )
+    else:
+        sig = _invalid()
+        if r > 0 and entry <= r * 1.0005:
+            calc = _calc_score_long_above_resistance(entry, s, r)
+            if calc:
+                rr = float(calc["rr"])
+                sig = {
+                    "valid": rr >= cfg.V3_MIN_RR_RATIO,
+                    "direction": "BUY",
+                    "entry_type": "SCORE_LONG_ABOVE_R",
+                    "price": calc["price"],
+                    "sl": calc["sl"],
+                    "tp1": calc["tp1"],
+                    "tp2": calc["tp2"],
+                    "rr": rr,
+                    "preview": False,
+                }
+        # Broken-resistance LONG: fiyat direnc üstünde ama çok fazla değil (<%3)
+        if float(sig.get("rr", 0) or 0) <= 0 and r > 0 and entry > r:
+            breath = entry * sl_buffer_bps(entry) / 10000.0
+            band_w = max(r - s, breath * 4) if s > 0 and r > s else max(entry * 0.015, 8.0)
+            broken_sl = r - max(breath * 2.0, band_w * 0.04)
+            broken_tp2 = entry + max(breath * 2.0, band_w * 0.15)
+            risk = max(entry - broken_sl, 0.0001)
+            reward = max(broken_tp2 - entry, 0.0001)
+            broken_rr = reward / risk
+            if broken_sl < entry and broken_tp2 > entry and broken_rr >= 1.0:
+                sig = {
+                    "valid": broken_rr >= cfg.V3_MIN_RR_RATIO,
+                    "direction": "BUY",
+                    "entry_type": "BROKEN_RESISTANCE_LONG",
+                    "price": entry,
+                    "sl": round(broken_sl, 2),
+                    "tp1": round(entry + risk, 2),
+                    "tp2": round(broken_tp2, 2),
+                    "rr": broken_rr,
+                    "preview": False,
+                }
+        if float(sig.get("rr", 0) or 0) <= 0:
+            sig = _check_scenario_zone_entry("BUY", levels, entry, zone)
+        if float(sig.get("rr", 0) or 0) <= 0:
+            sig = _build_range_entry(
+                "BUY", entry, s, r, entry_type="SCORE_BUY", require_min_rr=False
+            )
+    if not sig.get("valid"):
+        prev = _range_preview(levels, entry)
+        if str(prev.get("direction") or "").upper() == direction:
+            return prev
+    return sig
 
 
 def get_entry_snapshot(*, allow_in_position: bool = False) -> dict:

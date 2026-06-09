@@ -521,25 +521,132 @@ def tp1_break_confirmed(side: str, close_px: float, tp1: float) -> bool:
     return False
 
 
+def _runner_swing_price(value) -> float:
+    try:
+        if isinstance(value, dict):
+            return float(value.get("price") or value.get("high") or value.get("low") or 0)
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _runner_recent_bars(limit: int = 24) -> list[dict]:
+    try:
+        from engine.structure import get_bars_15m
+
+        return list(get_bars_15m(limit) or [])
+    except Exception:
+        return []
+
+
+def _runner_structural_candidates(
+    side: str,
+    *,
+    mark: float,
+    current_sl: float,
+) -> list[float]:
+    """
+    TP1 sonrasi runner SL icin retest/swing raflari.
+    SHORT: mark ustundeki en yakin lower-high / retest direnci.
+    LONG: mark altindaki en yakin higher-low / pullback destegi.
+    """
+    mark_buf = float(getattr(cfg, "SL_LOCK_MARK_BUFFER_BPS", 10)) / 10000.0
+    runner_mark_buf = (
+        float(getattr(cfg, "RUNNER_SL_MIN_MARK_BUFFER_BPS", 80)) / 10000.0
+    )
+    min_step = max(mark * max(mark_buf, runner_mark_buf), 0.05)
+    candidates: list[float] = []
+
+    if side == "SHORT":
+        floor = mark + min_step
+        ceiling = current_sl - 0.01 if current_sl > 0 else float("inf")
+        for h in state.swing_highs_15m or []:
+            p = _runner_swing_price(h)
+            if floor < p < ceiling:
+                candidates.append(p)
+        bars = _runner_recent_bars()
+        for i in range(1, max(1, len(bars) - 1)):
+            try:
+                prev_h = float(bars[i - 1].get("high", 0) or 0)
+                high = float(bars[i].get("high", 0) or 0)
+                next_h = float(bars[i + 1].get("high", 0) or 0)
+            except (TypeError, ValueError, IndexError):
+                continue
+            if high >= prev_h and high >= next_h and floor < high < ceiling:
+                candidates.append(high)
+        return sorted(set(round(p, 2) for p in candidates))
+
+    if side == "LONG":
+        ceiling = mark - min_step
+        floor = current_sl + 0.01 if current_sl > 0 else 0.0
+        for l in state.swing_lows_15m or []:
+            p = _runner_swing_price(l)
+            if floor < p < ceiling:
+                candidates.append(p)
+        bars = _runner_recent_bars()
+        for i in range(1, max(1, len(bars) - 1)):
+            try:
+                prev_l = float(bars[i - 1].get("low", 0) or 0)
+                low = float(bars[i].get("low", 0) or 0)
+                next_l = float(bars[i + 1].get("low", 0) or 0)
+            except (TypeError, ValueError, IndexError):
+                continue
+            if low <= prev_l and low <= next_l and floor < low < ceiling:
+                candidates.append(low)
+        return sorted(set(round(p, 2) for p in candidates), reverse=True)
+
+    return []
+
+
 def trailing_sl_from_15m_close(
     side: str, close_15m: float, current_sl: float
 ) -> float:
     """
-    15m kapanışına göre SL adayı.
-    LONG: close > current_sl → close; aksi halde 0.
-    SHORT: close < current_sl → close; aksi halde 0.
+    TP1 sonrasi runner SL adayi.
+    LONG: 15m higher-low / pullback desteginin alti; yoksa close/mark buffer alti.
+    SHORT: 15m lower-high / retest direncinin ustu; yoksa close/mark buffer ustu.
     """
     if close_15m <= 0 or current_sl <= 0:
         return 0.0
     side = (side or "").upper()
+    mark = _mark() or close_15m
+    mark_buf = float(getattr(cfg, "SL_LOCK_MARK_BUFFER_BPS", 10)) / 10000.0
+    runner_buf = float(getattr(cfg, "RUNNER_SL_BUFFER_BPS", 18)) / 10000.0
+    runner_mark_buf = (
+        float(getattr(cfg, "RUNNER_SL_MIN_MARK_BUFFER_BPS", 80)) / 10000.0
+    )
+    buf = max(mark_buf, runner_buf)
+
     if side == "LONG":
-        if close_15m > current_sl:
-            return round(close_15m, 2)
+        if close_15m <= current_sl:
+            return 0.0
+        candidates = _runner_structural_candidates(
+            side, mark=mark, current_sl=current_sl
+        )
+        if candidates:
+            sl = candidates[0] * (1.0 - buf)
+        else:
+            sl = min(close_15m * (1.0 - buf), mark * (1.0 - runner_mark_buf))
+        sl = min(sl, mark * (1.0 - runner_mark_buf))
+        if _sl_tighter(side, sl, current_sl):
+            return round(sl, 2)
         return 0.0
+
     if side == "SHORT":
-        if close_15m < current_sl:
-            return round(close_15m, 2)
+        if close_15m >= current_sl:
+            return 0.0
+        candidates = _runner_structural_candidates(
+            side, mark=mark, current_sl=current_sl
+        )
+        if candidates:
+            sl = candidates[0] * (1.0 + buf)
+        else:
+            sl = max(close_15m * (1.0 + buf), mark * (1.0 + runner_mark_buf))
+        sl = max(sl, mark * (1.0 + runner_mark_buf))
+        if _sl_tighter(side, sl, current_sl):
+            return round(sl, 2)
         return 0.0
+
     return 0.0
 
 
@@ -579,3 +686,38 @@ def sl_manage_cooldown_ok() -> bool:
 
 def mark_sl_managed() -> None:
     state.pos_sl_manage_ts = time.time()
+
+
+def breakeven_sl_triggered(side: str, entry: float, mark: float) -> bool:
+    """
+    Breakeven SL tetik: pozisyon kâra geçtiğinde entry'ye çek.
+
+    V3_SL_BREAKEVEN_TRIGGER_PCT: kâr yüzdesi eşiği (varsayılan %0.6).
+    Sadece bir kez tetiklenir (sl_stage != 'breakeven' iken).
+    """
+    if not bool(getattr(cfg, "V3_SL_BREAKEVEN_ENABLED", True)):
+        return False
+    if state.pos_tp1_hit:
+        return False
+    stage = str((state.position_breakout or {}).get("sl_stage", ""))
+    if stage in ("breakeven", "runner", "trail_15m"):
+        return False
+    trigger_pct = float(getattr(cfg, "V3_SL_BREAKEVEN_TRIGGER_PCT", 0.6) or 0.6)
+    if entry <= 0 or mark <= 0:
+        return False
+    side = (side or "").upper()
+    if side == "SHORT":
+        profit_pct = (entry - mark) / entry * 100.0
+    else:
+        profit_pct = (mark - entry) / entry * 100.0
+    return profit_pct >= trigger_pct
+
+
+def breakeven_sl_price(side: str, entry: float) -> float:
+    """Entry fiyatına küçük buffer ekli breakeven SL."""
+    buf_bps = float(getattr(cfg, "V3_SL_BREAKEVEN_BUFFER_BPS", 5) or 5)
+    buf = entry * buf_bps / 10000.0
+    side = (side or "").upper()
+    if side == "SHORT":
+        return round(entry + buf, 2)   # SHORT: SL entry'nin biraz üstünde
+    return round(entry - buf, 2)       # LONG: SL entry'nin biraz altında

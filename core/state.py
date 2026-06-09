@@ -26,11 +26,30 @@ class BotState:
     range_view: dict = field(default_factory=dict)
     operation_view: dict = field(default_factory=dict)
     v3_levels: dict = field(default_factory=dict)
+    # Kirilan seviye -> yeni rol (V3 merge adaylari)
+    v3_flipped_levels: list = field(default_factory=list)
+    v3_liquidity_map: list = field(default_factory=list)
+    v3_zones: list = field(default_factory=list)
+    v3_zone_last_bar_key: str = ""
+    v3_liquidity_pools: list = field(default_factory=list)
+    v3_liquidity_bias: dict = field(default_factory=dict)
+    v3_vacuum_score: int = 0
+    v3_zone_clusters: list = field(default_factory=list)
+    v3_multi_tf_trend: dict = field(default_factory=dict)
+    v3_expected_move: dict = field(default_factory=dict)
+    v3_last_attribution: dict = field(default_factory=dict)
+    v3_attribution_last_log_ts: float = 0.0
     v3_structure: dict = field(default_factory=dict)
     v3_cvd: dict = field(default_factory=dict)
     v3_scenario: dict = field(default_factory=dict)
     v3_entry_signal: dict = field(default_factory=dict)
     v3_decision: dict = field(default_factory=dict)
+    v3_market_story: dict = field(default_factory=dict)
+    v3_market_state: dict = field(default_factory=dict)
+    v3_zone_layers: dict = field(default_factory=dict)
+    v3_trade_map: dict = field(default_factory=dict)
+    v3_exec_anchor: dict = field(default_factory=dict)
+    v3_trade_brain_snapshot: dict = field(default_factory=dict)
     market_narrative: dict = field(default_factory=dict)
     # Son kapanış — aynı yön tekrar giriş hesabı (süre değil, yapı)
     last_trade_exit: dict = field(default_factory=dict)
@@ -38,6 +57,13 @@ class BotState:
     position_breakout: dict = field(default_factory=dict)
     last_close_reason: str = ""
     last_close_source: str = ""
+    last_close_side: str = ""
+    last_close_price: float = 0.0
+    runner_reentry_block_until: float = 0.0
+    runner_reentry_block_reason: str = ""
+    consecutive_losses: int = 0
+    loss_cooldown_until: float = 0.0
+    loss_cooldown_reason: str = ""
     auto_trade_period: int = 0
     last_auto_trade_ts: float = 0.0
     forming_15m: dict = field(default_factory=dict)
@@ -172,8 +198,7 @@ class BotState:
         self.pos_open_ts  = 0.0
         self.unrealized_pnl = 0.0
         self.position_breakout = {}
-        self.last_close_reason = ""
-        self.last_close_source = ""
+        self.v3_trade_brain_snapshot = {}
         try:
             from engine.breakout import on_position_closed
 

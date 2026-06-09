@@ -804,6 +804,29 @@ def _update_decision_probabilistic(
         }
         return _commit_decision(snap, flow_tag=flow_tag, flow_force=flow_force)
 
+    # --- Tradeability / Conviction Gate ---
+    # Skor LONG/SHORT dese bile piyasa işlenebilir değilse (akışa ters veya chop)
+    # girişi WAIT'e çevir. Açık pozisyon/çıkışları etkilemez.
+    from engine.tradeability_v3 import assess_tradeability
+
+    _tradeable, _gate_reason = assess_tradeability(
+        action, levels, cvd, px=px, market_state=None
+    )
+    if not _tradeable:
+        snap = {
+            "action": "WAIT",
+            "reason": f"TRADEABILITY: {_gate_reason}",
+            "levels": levels,
+            "structure": structure,
+            "scenario": scenario,
+            "cvd": cvd,
+            "entry": signal,
+            "direction_scores": scores,
+            "trade_thesis": thesis_snapshot(theses) if theses else {},
+            "reject_reason": "TRADEABILITY",
+        }
+        return _commit_decision(snap, flow_tag=flow_tag, flow_force=flow_force)
+
     if selected_thesis is not None:
         side_entry = selected_thesis.entry
     else:

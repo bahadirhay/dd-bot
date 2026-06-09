@@ -588,8 +588,11 @@ def _resolve_trade_band(
         # En yakın SR desteği — makro çok uzaktaysa bunu tercih et
         nearest_sr_s = sups_all[0]
         nearest_sr_s_px = float(nearest_sr_s.get("price", 0) or 0)
-        # Makro çok uzaksa (fiyatın %3+ altı) SR kullan
-        if macro_s > 0 and (px - macro_s) > px * 0.03 and nearest_sr_s_px > macro_s:
+        # Fiyatın hemen altındaki gerçek SR desteği makro desteğin ÜZERİNDEyse,
+        # trade bandının tabanı odur (grafik "aktif destek" etiketi + zone bunu
+        # kullanır). Aksi halde 7-10 pt aşağıdaki makro destek "aktif" görünür ve
+        # fiyat aslında desteğin üstündeyken band ortada sanılır.
+        if macro_s < nearest_sr_s_px < px:
             s_lvl = nearest_sr_s
         elif macro_s >= px:
             s_lvl = nearest_sr_s

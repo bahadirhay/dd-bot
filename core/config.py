@@ -578,6 +578,22 @@ class Config:
     V3_SL_BREAKEVEN_ENABLED = os.getenv("V3_SL_BREAKEVEN_ENABLED", "true").lower() in ("1", "true", "yes")
     V3_SL_BREAKEVEN_TRIGGER_PCT = float(os.getenv("V3_SL_BREAKEVEN_TRIGGER_PCT", "0.6"))
     V3_SL_BREAKEVEN_BUFFER_BPS = float(os.getenv("V3_SL_BREAKEVEN_BUFFER_BPS", "5"))
+    # Dar trade-band'da giriş SL'ini uzak swing yerine aktif banda sabitle
+    V3_SL_BAND_CLAMP_ENABLED = os.getenv("V3_SL_BAND_CLAMP_ENABLED", "true").lower() in ("1", "true", "yes")
+    V3_SL_BAND_CLAMP_BUFFER_BPS = float(os.getenv("V3_SL_BAND_CLAMP_BUFFER_BPS", "30"))
+    # Min SL mesafe tabanı: SL girişe %X'ten yakınsa giriş geçersiz (gürültü-stop önlemi)
+    V3_MIN_SL_DIST_PCT = float(os.getenv("V3_MIN_SL_DIST_PCT", "0.25"))
+    # Kayıp-sonrası cooldown: art arda kayıpta artan bekleme (overtrading/churn freni)
+    V3_LOSS_COOLDOWN_ENABLED = os.getenv("V3_LOSS_COOLDOWN_ENABLED", "true").lower() in ("1", "true", "yes")
+    V3_LOSS_COOLDOWN_BASE_SEC = float(os.getenv("V3_LOSS_COOLDOWN_BASE_SEC", "600"))   # ilk kayıp: 10 dk
+    V3_LOSS_COOLDOWN_MAX_MULT = float(os.getenv("V3_LOSS_COOLDOWN_MAX_MULT", "4"))     # tavan: 40 dk
+    V3_LOSS_COOLDOWN_MIN_PNL_PCT = float(os.getenv("V3_LOSS_COOLDOWN_MIN_PNL_PCT", "-0.05"))  # bundan kötü kayıp sayılır
+    # Tradeability / Conviction Gate: skor ne derse desin işlenebilirlik kapısı
+    V3_TRADEABILITY_GATE_ENABLED = os.getenv("V3_TRADEABILITY_GATE_ENABLED", "true").lower() in ("1", "true", "yes")
+    V3_TRADEABLE_REQUIRE_FLOW_ALIGN = os.getenv("V3_TRADEABLE_REQUIRE_FLOW_ALIGN", "true").lower() in ("1", "true", "yes")
+    V3_TRADEABLE_MIN_BAND_PCT = float(os.getenv("V3_TRADEABLE_MIN_BAND_PCT", "0.006"))   # bant <%0.6 = dar
+    V3_TRADEABLE_MIN_CONVICTION = float(os.getenv("V3_TRADEABLE_MIN_CONVICTION", "70"))  # collapse state_score
+    V3_TRADEABLE_MIN_FLOW_EDGE = float(os.getenv("V3_TRADEABLE_MIN_FLOW_EDGE", "0.03"))  # |buy_ratio-0.5|
     # RANGE_BUY / RANGE_SELL: yon bazli min skor + guc (BUY siki, SELL daha esnek)
     V3_MIN_RANGE_SCORE = int(os.getenv("V3_MIN_RANGE_SCORE", "10"))
     V3_MIN_RANGE_SCORE_BUY = int(

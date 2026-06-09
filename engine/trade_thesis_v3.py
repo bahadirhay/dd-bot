@@ -70,6 +70,31 @@ def _swing_sl_anchor(side: str, px: float) -> float:
         return lows[0] if lows else 0.0
 
 
+def _band_clamp_anchor(
+    side: str, anchor: float, ref_r: float, ref_s: float, px: float, levels: dict
+) -> float:
+    """
+    Dar trade-band'da SL çapasını aktif banda sabitle.
+
+    Uzak swing high/low (ör. impulse tepesi 1713) bir RANGE içinde SL'i 40+ pt
+    açıp RR'yi <1'e düşürüyor. trade_band aktifken SHORT için aktif direncin,
+    LONG için aktif desteğin küçük buffer ötesini tavan/taban kabul et.
+    """
+    if anchor <= 0:
+        return anchor
+    if not bool(getattr(cfg, "V3_SL_BAND_CLAMP_ENABLED", True)):
+        return anchor
+    if not bool(levels.get("trade_band")):
+        return anchor
+    buf = float(getattr(cfg, "V3_SL_BAND_CLAMP_BUFFER_BPS", 30.0) or 30.0) / 10000.0
+    side = (side or "").upper()
+    if side == "SHORT" and ref_r > px:
+        return min(anchor, ref_r * (1.0 + buf))
+    if side == "LONG" and 0 < ref_s < px:
+        return max(anchor, ref_s * (1.0 - buf))
+    return anchor
+
+
 def _layer_tp(side: str, px: float, levels: dict) -> float:
     """
     TP: market_state layer'larından — tarihsel değil, anlık yapısal bölge.
@@ -749,6 +774,8 @@ def _entry_thesis(
         elif thesis_type == "SWING_HIGH_REJECTION":
             # bounce_high = recent swing high passed via levels["_swing_high_ref"]
             swing_hi = float(levels.get("_swing_high_ref") or ref_r)
+            # Dar RANGE: uzak swing high yerine aktif direnç tavanına sabitle.
+            swing_hi = _band_clamp_anchor("SHORT", swing_hi, ref_r, ref_s, px, levels)
             buf = max(swing_hi * 0.003, 1.0)
             invalidation = swing_hi + buf
             sl_source = "swing_high_15m"
@@ -831,9 +858,23 @@ def _entry_thesis(
         valid_geometry = valid_geometry and inv > px and target < px
     else:
         valid_geometry = valid_geometry and inv < px and target > px
+    # --- Min SL mesafe tabanı (gürültü-stop önlemi) ---
+    # SL girişe çok yakınsa (ör. %0.06) RR kâğıt üstünde iyi görünse de
+    # piyasa gürültüsü anında stop tetikliyor (#56/#57 tipi). 0.25%'ten dar
+    # SL'leri geçersiz say → bu girişleri tamamen ele.
+    entry_px = float(entry.get("price", 0) or px)
+    min_sl_pct = float(getattr(cfg, "V3_MIN_SL_DIST_PCT", 0.25) or 0.0)
+    sl_too_tight = False
+    if min_sl_pct > 0 and entry_px > 0 and inv > 0:
+        sl_dist_pct = abs(inv - entry_px) / entry_px * 100.0
+        if sl_dist_pct < min_sl_pct:
+            valid_geometry = False
+            sl_too_tight = True
     state = "VALID" if valid_geometry and rr >= min_rr else "WEAK"
     if not valid_geometry:
         state = "INVALID"
+    if sl_too_tight:
+        reason = f"{reason}; SL cok dar ({abs(inv - entry_px) / entry_px * 100.0:.2f}%<{min_sl_pct:.2f}%) — gurultu-stop riski"
     return TradeThesis(
         direction=direction,
         state=state,

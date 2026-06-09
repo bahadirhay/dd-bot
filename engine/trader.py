@@ -33,6 +33,40 @@ def _mark_traded():
     state.last_auto_trade_ts = time.time()
 
 
+def _runner_reentry_block_message(direction: str) -> str:
+    until = float(getattr(state, "runner_reentry_block_until", 0) or 0)
+    now = time.time()
+    if until <= now:
+        if until > 0:
+            state.runner_reentry_block_until = 0.0
+            state.runner_reentry_block_reason = ""
+        return ""
+    left = max(until - now, 0.0)
+    side = str(getattr(state, "last_close_side", "") or "?")
+    px = float(getattr(state, "last_close_price", 0) or 0)
+    reason = str(getattr(state, "runner_reentry_block_reason", "") or "")
+    detail = reason or f"{side} runner SL sonrası yeni S/R sinyali bekleniyor"
+    price_txt = f" exit={px:.2f}" if px > 0 else ""
+    return f"{detail}; {direction} girişi {left:.0f}s kilitli{price_txt}"
+
+
+def _loss_cooldown_message(direction: str) -> str:
+    """Art arda kayıp sonrası giriş molası aktifse mesaj döndür, değilse ''."""
+    if not bool(getattr(cfg, "V3_LOSS_COOLDOWN_ENABLED", True)):
+        return ""
+    until = float(getattr(state, "loss_cooldown_until", 0) or 0)
+    now = time.time()
+    if until <= now:
+        if until > 0:
+            state.loss_cooldown_until = 0.0
+            state.loss_cooldown_reason = ""
+        return ""
+    left = max(until - now, 0.0)
+    reason = str(getattr(state, "loss_cooldown_reason", "") or "")
+    detail = reason or "art arda kayıp sonrası giriş molası"
+    return f"{detail}; {direction} {left / 60.0:.0f}dk kilitli"
+
+
 async def execute_entry(details: dict, source: str = "breakout") -> bool:
     """Risk planı + borsa/paper emri."""
     from core.config import reload_keys
@@ -41,7 +75,16 @@ async def execute_entry(details: dict, source: str = "breakout") -> bool:
     from utils.notifier import notify_open
 
     if not cfg.AUTO_TRADE_ENABLED:
-        log.info(f"Otomatik trade kapalı — sinyal: {details['direction']} ({source})")
+        if getattr(cfg, "STRATEGY_V3_ENABLED", False) and details.get("v3_mode"):
+            from engine.no_trade_log_v3 import log_execute_block
+
+            log_execute_block(
+                "auto_trade_off",
+                f"sinyal {details.get('direction')} hazir",
+                source=source,
+            )
+        else:
+            log.info(f"Otomatik trade kapalı — sinyal: {details['direction']} ({source})")
         return False
 
     if not getattr(state, "exchange_reconciled", True):
@@ -54,6 +97,26 @@ async def execute_entry(details: dict, source: str = "breakout") -> bool:
     reload_keys()
     direction = (details.get("direction") or "").upper()
     if not direction:
+        return False
+
+    runner_block = _runner_reentry_block_message(direction)
+    if runner_block:
+        log.info(f"Giriş atlandı — {runner_block} ({source})")
+        state.no_entry_reason = f"[RUNNER_REENTRY_WAIT] {runner_block}"
+        if getattr(cfg, "STRATEGY_V3_ENABLED", False) and details.get("v3_mode"):
+            from engine.no_trade_log_v3 import log_execute_block
+
+            log_execute_block("runner_reentry_wait", runner_block, source=source)
+        return False
+
+    loss_block = _loss_cooldown_message(direction)
+    if loss_block:
+        log.info(f"Giriş atlandı — {loss_block} ({source})")
+        state.no_entry_reason = f"[LOSS_COOLDOWN] {loss_block}"
+        if getattr(cfg, "STRATEGY_V3_ENABLED", False) and details.get("v3_mode"):
+            from engine.no_trade_log_v3 import log_execute_block
+
+            log_execute_block("loss_cooldown", loss_block, source=source)
         return False
 
     is_reverse = bool(
@@ -234,6 +297,22 @@ async def on_15m_market(candle: dict) -> None:
         snap = update_decision()
         state.no_entry_reason = str(snap.get("reason") or snap.get("action") or "")
         log_decision_diag(snap, tag="15m-kapanis", force=True)
+
+        # Ters sinyal: pozisyon açıkken geçerli ters thesis → hemen ters çevir.
+        # (Thesis fail + kapatma durumunda not state.in_position kolu devreye girer.)
+        if (
+            state.in_position
+            and snap.get("reverse_signal")
+            and snap.get("action") in ("LONG", "SHORT")
+        ):
+            details = dict(snap.get("details") or {})
+            if details:
+                log.info(
+                    f"[V3 TERS] {state.pos_side} → {snap['action']} — "
+                    f"ters thesis geçerli, pozisyon çevriliyor"
+                )
+                await execute_entry(details, source="v3-ters")
+            return
 
         if not state.in_position and snap.get("action") in ("LONG", "SHORT"):
             details = dict(snap.get("details") or {})

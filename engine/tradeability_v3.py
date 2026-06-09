@@ -58,6 +58,23 @@ def assess_tradeability(
                 f"order-flow ters: SHORT ama CVD BULL (alım %{buy_ratio * 100:.0f})"
             )
 
+        # 1b) Kümülatif akış counterflow — anlık direction nötr olsa bile
+        # kalıcı (kümülatif) akış güçlü ters yöndeyse girişi engelle.
+        # Örn. #60: SHORT açıldı ama cvd_cum=+8706 (yoğun alım) → engellenmeli.
+        cum = float(cvd.get("cumulative", 0) or 0)
+        cum_thr = float(getattr(cfg, "V3_TRADEABLE_CVD_CUM_COUNTER", 4000.0) or 4000.0)
+        if cum_thr > 0:
+            if act == "SHORT" and cum >= cum_thr:
+                return False, (
+                    f"kümülatif akış ters: SHORT ama CVD cum=+{cum:.0f}>={cum_thr:.0f} "
+                    f"(kalıcı alım)"
+                )
+            if act == "LONG" and cum <= -cum_thr:
+                return False, (
+                    f"kümülatif akış ters: LONG ama CVD cum={cum:.0f}<=-{cum_thr:.0f} "
+                    f"(kalıcı satış)"
+                )
+
     # 2) Chop filtresi: dar bant + zayıf konviksiyon + dengeli akış
     min_band = float(getattr(cfg, "V3_TRADEABLE_MIN_BAND_PCT", 0.006) or 0.006)
     min_conv = float(getattr(cfg, "V3_TRADEABLE_MIN_CONVICTION", 70.0) or 70.0)

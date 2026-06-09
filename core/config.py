@@ -595,6 +595,7 @@ class Config:
     V3_TRADEABLE_MIN_BAND_PCT = float(os.getenv("V3_TRADEABLE_MIN_BAND_PCT", "0.006"))   # bant <%0.6 = dar
     V3_TRADEABLE_MIN_CONVICTION = float(os.getenv("V3_TRADEABLE_MIN_CONVICTION", "70"))  # collapse state_score
     V3_TRADEABLE_MIN_FLOW_EDGE = float(os.getenv("V3_TRADEABLE_MIN_FLOW_EDGE", "0.03"))  # |buy_ratio-0.5|
+    V3_TRADEABLE_CVD_CUM_COUNTER = float(os.getenv("V3_TRADEABLE_CVD_CUM_COUNTER", "4000"))  # kümülatif akış counterflow eşiği
     # RANGE_BUY / RANGE_SELL: yon bazli min skor + guc (BUY siki, SELL daha esnek)
     V3_MIN_RANGE_SCORE = int(os.getenv("V3_MIN_RANGE_SCORE", "10"))
     V3_MIN_RANGE_SCORE_BUY = int(

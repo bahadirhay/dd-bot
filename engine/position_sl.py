@@ -628,6 +628,11 @@ def trailing_sl_from_15m_close(
         else:
             sl = min(close_15m * (1.0 - buf), mark * (1.0 - runner_mark_buf))
         sl = min(sl, mark * (1.0 - runner_mark_buf))
+        # Entry clamp (#54 önlemi): fiyat hâlâ kârdayken (mark>entry, LONG)
+        # runner SL girişin altına düşmesin → TP1 kârını koru, en kötü breakeven.
+        _entry = float(state.pos_entry or 0)
+        if _entry > 0 and mark > _entry:
+            sl = max(sl, _entry * (1.0 + 0.0003))
         if _sl_tighter(side, sl, current_sl):
             return round(sl, 2)
         return 0.0
@@ -643,6 +648,11 @@ def trailing_sl_from_15m_close(
         else:
             sl = max(close_15m * (1.0 + buf), mark * (1.0 + runner_mark_buf))
         sl = max(sl, mark * (1.0 + runner_mark_buf))
+        # Entry clamp (#54 önlemi): fiyat hâlâ kârdayken (mark<entry, SHORT)
+        # runner SL girişin üstüne çıkmasın → TP1 kârını koru, en kötü breakeven.
+        _entry = float(state.pos_entry or 0)
+        if _entry > 0 and mark < _entry:
+            sl = min(sl, _entry * (1.0 - 0.0003))
         if _sl_tighter(side, sl, current_sl):
             return round(sl, 2)
         return 0.0

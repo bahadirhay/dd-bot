@@ -810,6 +810,22 @@ def _update_decision_probabilistic(
         side_entry = build_entry_for_score_side(action, levels, px, scenario)
     min_rr = float(getattr(cfg, "V3_MIN_RR_RATIO", 2.0) or 2.0)
     rr = float(side_entry.get("rr", 0) or 0)
+
+    # Dar bant + güçlü yön: RR eşiğini gevşet (1.5). Dar kanalda RR düşük ama
+    # isabet yüksek; SHORT/LONG skoru baskınsa düşük RR'yi kabul et.
+    _prob = float(
+        scores.get("prob_short_pct" if action == "SHORT" else "prob_long_pct") or 0
+    )
+    _band_w = 0.0
+    _bs = float(levels.get("active_support") or 0)
+    _br = float(levels.get("active_resistance") or 0)
+    if _bs > 0 and _br > _bs:
+        _band_w = (_br - _bs) / _br  # bant genişliği oranı
+    _narrow = 0 < _band_w <= float(getattr(cfg, "V3_NARROW_BAND_PCT", 0.02) or 0.02)
+    _strong_dir = _prob >= float(getattr(cfg, "V3_STRONG_DIR_PROB", 65.0) or 65.0)
+    if _narrow and _strong_dir:
+        min_rr = float(getattr(cfg, "V3_MIN_RR_NARROW_STRONG", 1.5) or 1.5)
+
     if not side_entry.get("valid") and rr < min_rr:
         snap = {
             "action": "WAIT",

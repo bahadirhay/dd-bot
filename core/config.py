@@ -159,9 +159,11 @@ class Config:
     V3_SR_USE_PIVOT = os.getenv("V3_SR_USE_PIVOT", "true").lower() in ("1", "true", "yes")
     V3_SR_USE_POC = os.getenv("V3_SR_USE_POC", "false").lower() in ("1", "true", "yes")
     V3_SR_SOURCE = os.getenv("V3_SR_SOURCE", "close").lower()
-    V3_SR_LOOKBACK_LEFT = int(os.getenv("V3_SR_LOOKBACK_LEFT", "10"))   # 50 → 10
-    V3_SR_LOOKBACK_RIGHT = int(os.getenv("V3_SR_LOOKBACK_RIGHT", "3"))  # 20 → 3
-    V3_SR_QUICK_RIGHT = int(os.getenv("V3_SR_QUICK_RIGHT", "2"))        # 10 → 2
+    # right=8 orta nokta: right=3 çok hassas (band jitter), right=20 çok yavaş.
+    # ~2 saat pivot teyidi — bandı genişletir, gürültüyü azaltır, hâlâ güncel.
+    V3_SR_LOOKBACK_LEFT = int(os.getenv("V3_SR_LOOKBACK_LEFT", "15"))   # 50 → 15
+    V3_SR_LOOKBACK_RIGHT = int(os.getenv("V3_SR_LOOKBACK_RIGHT", "8"))  # 20 → 8
+    V3_SR_QUICK_RIGHT = int(os.getenv("V3_SR_QUICK_RIGHT", "4"))        # 10 → 4
     # Real-time swing yapısı — indikatör değil, anlık fiyat hareketi
     V3_SWING_BAND_ENABLED = os.getenv("V3_SWING_BAND_ENABLED", "true").lower() in ("1", "true", "yes")
     V3_SWING_BAND_MAX_BARS = int(os.getenv("V3_SWING_BAND_MAX_BARS", "10"))  # son N bar swing
@@ -565,6 +567,13 @@ class Config:
     V3_REVERSE_MIN_SCORE_PROB = float(os.getenv("V3_REVERSE_MIN_SCORE_PROB", "55.0"))
     # Swing high fallback için min RR (normal RR'den daha gevşek olabilir)
     V3_REVERSE_SWING_HIGH_MIN_RR = float(os.getenv("V3_REVERSE_SWING_HIGH_MIN_RR", "1.5"))
+    # Ekstrem CVD ters-akış vetosu (range girişlerde squeeze önlemi)
+    V3_CVD_COUNTERFLOW_SHORT = float(os.getenv("V3_CVD_COUNTERFLOW_SHORT", "0.70"))
+    V3_CVD_COUNTERFLOW_LONG = float(os.getenv("V3_CVD_COUNTERFLOW_LONG", "0.30"))
+    # Dar bant + güçlü yön: RR eşiği gevşetme
+    V3_NARROW_BAND_PCT = float(os.getenv("V3_NARROW_BAND_PCT", "0.02"))      # bant <%2 = dar
+    V3_STRONG_DIR_PROB = float(os.getenv("V3_STRONG_DIR_PROB", "65.0"))      # prob >=%65 = güçlü
+    V3_MIN_RR_NARROW_STRONG = float(os.getenv("V3_MIN_RR_NARROW_STRONG", "1.5"))
     # Breakeven SL: pozisyon %X kâra geçince SL entry'ye çekil
     V3_SL_BREAKEVEN_ENABLED = os.getenv("V3_SL_BREAKEVEN_ENABLED", "true").lower() in ("1", "true", "yes")
     V3_SL_BREAKEVEN_TRIGGER_PCT = float(os.getenv("V3_SL_BREAKEVEN_TRIGGER_PCT", "0.6"))

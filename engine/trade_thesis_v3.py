@@ -1329,6 +1329,27 @@ def build_trade_theses(
             ref_r=ref_r,
         )
 
+    # ── Ekstrem CVD ters-akış vetosu (#53 -3.39% squeeze önlemi) ──────────────
+    # Güçlü alım akışında (ratio>0.70) SHORT, güçlü satışta (<0.30) LONG bloke.
+    # confirmed şartı yok — ekstrem oran tek başına yeterli (cum +4103 gibi).
+    _cvd_ratio = float((cvd or {}).get("buy_ratio", 0.5) or 0.5)
+    _veto_hi = float(getattr(cfg, "V3_CVD_COUNTERFLOW_SHORT", 0.70) or 0.70)
+    _veto_lo = float(getattr(cfg, "V3_CVD_COUNTERFLOW_LONG", 0.30) or 0.30)
+    for _side_key, _t in (("short", out.get("short")), ("long", out.get("long"))):
+        if not isinstance(_t, TradeThesis) or _t.state != "VALID":
+            continue
+        _against = (_side_key == "short" and _cvd_ratio >= _veto_hi) or (
+            _side_key == "long" and _cvd_ratio <= _veto_lo
+        )
+        if _against:
+            _t.state = "WEAK"
+            if isinstance(_t.entry, dict):
+                _t.entry["valid"] = False
+            _t.reason = (
+                f"{_t.reason}; CVD ekstrem ters-akış veto "
+                f"(ratio={_cvd_ratio:.2f}, {_side_key} engellendi)"
+            )
+
     candidates = [
         t for t in (out.get("short"), out.get("long"))
         if isinstance(t, TradeThesis) and t.state == "VALID"

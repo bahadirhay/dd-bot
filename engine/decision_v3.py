@@ -804,6 +804,31 @@ def _update_decision_probabilistic(
         }
         return _commit_decision(snap, flow_tag=flow_tag, flow_force=flow_force)
 
+    # --- Minimum edge kapısı (tez yolu da skoru baypas edemez) ---
+    # Tez geçerli olsa bile, yön olasılığı eşiğin altındaysa (50/50 = edge yok)
+    # giriş yapma. "EDGE YOK iken thesis LONG açma" sorununun kökü.
+    _side_prob = float(
+        scores.get("prob_long_pct" if action == "LONG" else "prob_short_pct") or 0
+    ) / 100.0
+    _min_edge = float(getattr(cfg, "V3_THESIS_MIN_PROB", 0.55) or 0.55)
+    if _side_prob < _min_edge:
+        snap = {
+            "action": "WAIT",
+            "reason": (
+                f"EDGE YOK (tez yolu): {action} prob %{_side_prob * 100:.1f} "
+                f"< %{_min_edge * 100:.0f} eşik — yazı-tura giriş engellendi"
+            ),
+            "levels": levels,
+            "structure": structure,
+            "scenario": scenario,
+            "cvd": cvd,
+            "entry": signal,
+            "direction_scores": scores,
+            "trade_thesis": thesis_snapshot(theses) if theses else {},
+            "reject_reason": "LOW_EDGE",
+        }
+        return _commit_decision(snap, flow_tag=flow_tag, flow_force=flow_force)
+
     # --- Tradeability / Conviction Gate ---
     # Skor LONG/SHORT dese bile piyasa işlenebilir değilse (akışa ters veya chop)
     # girişi WAIT'e çevir. Açık pozisyon/çıkışları etkilemez.

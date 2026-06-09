@@ -713,11 +713,14 @@ def _entry_thesis(
     ref_s, ref_r = _active_prices(levels, scenario)
     sl_source = ""
     sl_anchor = 0.0
+    target = 0.0          # default — BROKEN_* dalları aşağıda doldurur
+    invalidation = 0.0
     if direction == "SHORT":
         if thesis_type == "BROKEN_SUPPORT":
             invalidation, sl_source, sl_anchor = _broken_support_invalidation_info(
                 levels, px, ref_s
             )
+            target = _first_demand_below(levels, px) or _nearest_below(levels, px)
         elif thesis_type == "LOCAL_SUPPLY_REJECTION":
             layer = _layer_band(levels, str(levels.get("local_layer_key") or "supply_mid"))
             layer_hi = float(layer.get("high") or ref_r)
@@ -768,6 +771,7 @@ def _entry_thesis(
             invalidation, sl_source, sl_anchor = _broken_resistance_invalidation_info(
                 levels, px, ref_r
             )
+            target = _first_supply_above(levels, px) or _nearest_above(levels, px, ref_r)
         elif thesis_type == "LOCAL_DEMAND_HOLD":
             layer_key = str(levels.get("local_layer_key") or "demand_weak")
             layer = _layer_band(levels, layer_key)

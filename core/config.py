@@ -581,6 +581,8 @@ class Config:
     # Dar trade-band'da giriş SL'ini uzak swing yerine aktif banda sabitle
     V3_SL_BAND_CLAMP_ENABLED = os.getenv("V3_SL_BAND_CLAMP_ENABLED", "true").lower() in ("1", "true", "yes")
     V3_SL_BAND_CLAMP_BUFFER_BPS = float(os.getenv("V3_SL_BAND_CLAMP_BUFFER_BPS", "30"))
+    # RANGE tezinde TP'yi kanal sınırına sabitle (destek altı/direnç üstü hedefleme)
+    V3_RANGE_TP_BAND_CLAMP = os.getenv("V3_RANGE_TP_BAND_CLAMP", "true").lower() in ("1", "true", "yes")
     # Min SL mesafe tabanı: SL girişe %X'ten yakınsa giriş geçersiz (gürültü-stop önlemi)
     V3_MIN_SL_DIST_PCT = float(os.getenv("V3_MIN_SL_DIST_PCT", "0.25"))
     # Yapı skoru kaynağı: "swing" (BOS/CHoCH, anlık) | "collapse" (eski, yapışkan)

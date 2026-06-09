@@ -95,6 +95,32 @@ def _band_clamp_anchor(
     return anchor
 
 
+def _range_tp_clamp(
+    side: str, tp1: float, tp2: float, ref_s: float, ref_r: float, px: float
+) -> tuple[float, float]:
+    """
+    RANGE tezinde TP'yi kanal sınırına sabitle.
+
+    SHORT: runner hedefi (tp2) kanal desteğinin (ref_s) ALTINA inmesin —
+    desteğin altı breakout bölgesi, ayrı tez. LONG: tp2 kanal direncinin
+    (ref_r) ÜSTÜNE çıkmasın. tp1 (kısmi) kanal içinde kalır.
+    """
+    if not bool(getattr(cfg, "V3_RANGE_TP_BAND_CLAMP", True)):
+        return tp1, tp2
+    side = (side or "").upper()
+    if side == "SHORT" and ref_s > 0:
+        if tp2 > 0 and tp2 < ref_s:
+            tp2 = ref_s                      # runner = kanal desteği
+        if tp1 > 0 and tp1 < tp2:            # tp1 her zaman entry'ye daha yakın (yüksek)
+            tp1 = (px + tp2) / 2.0
+    elif side == "LONG" and ref_r > 0:
+        if tp2 > 0 and tp2 > ref_r:
+            tp2 = ref_r
+        if tp1 > 0 and tp1 > tp2:
+            tp1 = (px + tp2) / 2.0
+    return tp1, tp2
+
+
 def _layer_tp(side: str, px: float, levels: dict) -> float:
     """
     TP: market_state layer'larından — tarihsel değil, anlık yapısal bölge.
@@ -759,9 +785,13 @@ def _entry_thesis(
 
             fallback = max(ref_r * 1.001, px * 1.0002)
             invalidation = _structural_sl_short(px, ref_r, fallback)
+            # Dar RANGE: SL'i uzak swing high (supply_major) yerine aktif direnç
+            # bandına clamp'le — executed SL de bunu kullansın.
+            invalidation = _band_clamp_anchor("SHORT", invalidation, ref_r, ref_s, px, levels)
             sl_source = "swing_high_15m"
             sl_anchor = ref_r
             tp1, tp2 = _range_short_tp_ladder(levels, px, ref_s)
+            tp1, tp2 = _range_tp_clamp("SHORT", tp1, tp2, ref_s, ref_r, px)
             target = tp2
             entry = _entry_from_range_ladder_geometry(
                 direction,
@@ -778,9 +808,11 @@ def _entry_thesis(
             swing_hi = _band_clamp_anchor("SHORT", swing_hi, ref_r, ref_s, px, levels)
             buf = max(swing_hi * 0.003, 1.0)
             invalidation = swing_hi + buf
+            invalidation = _band_clamp_anchor("SHORT", invalidation, ref_r, ref_s, px, levels)
             sl_source = "swing_high_15m"
             sl_anchor = swing_hi
             tp1, tp2 = _range_short_tp_ladder(levels, px, ref_s)
+            tp1, tp2 = _range_tp_clamp("SHORT", tp1, tp2, ref_s, ref_r, px)
             target = tp2
             entry = _entry_from_range_ladder_geometry(
                 direction,
@@ -813,9 +845,11 @@ def _entry_thesis(
 
             fallback = min(ref_s * 0.999, px * 0.9998)
             invalidation = _structural_sl_long(px, ref_s, fallback)
+            invalidation = _band_clamp_anchor("LONG", invalidation, ref_r, ref_s, px, levels)
             sl_source = "swing_low_15m"
             sl_anchor = ref_s
             tp1, tp2 = _range_long_tp_ladder(levels, px, ref_r)
+            tp1, tp2 = _range_tp_clamp("LONG", tp1, tp2, ref_s, ref_r, px)
             target = tp2
             entry = _entry_from_range_ladder_geometry(
                 direction,

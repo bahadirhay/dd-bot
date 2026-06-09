@@ -33,6 +33,45 @@ def _mark_traded():
     state.last_auto_trade_ts = time.time()
 
 
+def _startup_warmup_block() -> str:
+    """
+    Açılış ısınması — veri tazeliği kapısı (timer değil, data-readiness).
+
+    Cold start'ta state.ticks REST bootstrap'tan dolu ama BAYAT; canlı order-flow
+    henüz oluşmadı. Bu yüzden ilk girişten önce:
+      • en az V3_STARTUP_WARMUP_MIN_SEC canlı akış (order-flow penceresi ısınsın)
+      • + ilk canlı 5m mum kapanışı (taze in-session yapı hesaplansın)
+    İkisi sağlanınca kalıcı olarak açılır (bir kez). Seans ortasını etkilemez.
+    """
+    if not bool(getattr(cfg, "V3_STARTUP_WARMUP_ENABLED", True)):
+        return ""
+    if getattr(state, "startup_warmup_done", False):
+        return ""
+    start = float(getattr(state, "session_start_ts", 0) or 0)
+    if start <= 0:
+        state.startup_warmup_done = True
+        return ""
+    now = time.time()
+    elapsed = now - start
+    min_sec = float(getattr(cfg, "V3_STARTUP_WARMUP_MIN_SEC", 150) or 150)
+    need_5m = bool(getattr(cfg, "V3_STARTUP_REQUIRE_5M_CLOSE", True))
+    five_m_closed = int(now // 300) > int(start // 300)
+    if elapsed >= min_sec and (five_m_closed or not need_5m):
+        state.startup_warmup_done = True
+        log.info(
+            f"Acilis isinmasi tamam: {elapsed:.0f}s canli akis + 5m kapanis "
+            f"-> girisler aktif"
+        )
+        return ""
+    kalan = max(0.0, min_sec - elapsed)
+    parts = []
+    if kalan > 0:
+        parts.append(f"order-flow ısınması {kalan:.0f}s")
+    if need_5m and not five_m_closed:
+        parts.append("ilk canlı 5m kapanışı bekleniyor")
+    return "açılış ısınması: " + ", ".join(parts) + " (veri tazeleniyor)"
+
+
 async def execute_entry(details: dict, source: str = "breakout") -> bool:
     """Risk planı + borsa/paper emri."""
     from core.config import reload_keys
@@ -58,6 +97,16 @@ async def execute_entry(details: dict, source: str = "breakout") -> bool:
         return False
     if time.time() < getattr(state, "startup_grace_until", 0):
         log.debug("Startup grace — yeni giriş ertelendi")
+        return False
+
+    warmup = _startup_warmup_block()
+    if warmup:
+        log.info(f"Giriş atlandı — {warmup} ({source})")
+        state.no_entry_reason = f"[STARTUP_WARMUP] {warmup}"
+        if getattr(cfg, "STRATEGY_V3_ENABLED", False) and details.get("v3_mode"):
+            from engine.no_trade_log_v3 import log_execute_block
+
+            log_execute_block("startup_warmup", warmup, source=source)
         return False
 
     reload_keys()

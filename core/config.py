@@ -598,6 +598,10 @@ class Config:
     V3_TRADEABLE_CVD_CUM_COUNTER = float(os.getenv("V3_TRADEABLE_CVD_CUM_COUNTER", "4000"))  # kümülatif akış counterflow eşiği
     # Tez yolu min edge: yön olasılığı bunun altındaysa giriş yok (50/50 = edge yok)
     V3_THESIS_MIN_PROB = float(os.getenv("V3_THESIS_MIN_PROB", "0.55"))
+    # Açılış ısınması (veri tazeliği): canlı akış + ilk 5m kapanış beklenir
+    V3_STARTUP_WARMUP_ENABLED = os.getenv("V3_STARTUP_WARMUP_ENABLED", "true").lower() in ("1", "true", "yes")
+    V3_STARTUP_WARMUP_MIN_SEC = float(os.getenv("V3_STARTUP_WARMUP_MIN_SEC", "150"))
+    V3_STARTUP_REQUIRE_5M_CLOSE = os.getenv("V3_STARTUP_REQUIRE_5M_CLOSE", "true").lower() in ("1", "true", "yes")
     # RANGE_BUY / RANGE_SELL: yon bazli min skor + guc (BUY siki, SELL daha esnek)
     V3_MIN_RANGE_SCORE = int(os.getenv("V3_MIN_RANGE_SCORE", "10"))
     V3_MIN_RANGE_SCORE_BUY = int(

@@ -61,6 +61,8 @@ class BotState:
     last_close_price: float = 0.0
     auto_trade_period: int = 0
     last_auto_trade_ts: float = 0.0
+    session_start_ts: float = 0.0
+    startup_warmup_done: bool = False
     forming_15m: dict = field(default_factory=dict)
     intra_15m_summary: dict = field(default_factory=dict)
     _intra_last_log_pct: float = 0.0

@@ -172,12 +172,19 @@ async def _on_entry_confirmed(details: dict):
     # YENİ: günlük kayıp limiti kontrolü
     daily_guard = get_guard()
     if not daily_guard.can_trade():
-        log.warning("execute_entry: günlük limit → giriş iptal")
+        if getattr(cfg, "STRATEGY_V3_ENABLED", False):
+            from engine.no_trade_log_v3 import log_execute_block
+
+            log_execute_block("daily_loss_guard", "gunluk kayip limiti", source="entry")
+        else:
+            log.warning("execute_entry: günlük limit → giriş iptal")
         return
 
     # YENİ: V3 stale kontrolü
     if getattr(cfg, "STRATEGY_V3_ENABLED", False) and is_v3_stale():
-        log.warning("execute_entry: V3 stale → giriş iptal")
+        from engine.no_trade_log_v3 import log_execute_block
+
+        log_execute_block("v3_stale", "V3 guncelleme hatasi veya timeout", source="entry")
         return
 
     # YENİ: UNCLEAR yapıda azaltılmış risk
@@ -350,7 +357,20 @@ async def _main_loop():
 
     if cfg.API_KEY and not is_paper_mode():
         from execution.account_sync import reconcile_startup_exchange
-        await reconcile_startup_exchange()
+
+        try:
+            await reconcile_startup_exchange()
+        except Exception as e:
+            state.exchange_reconciled = False
+            state.api_ok = False
+            state.api_error = str(e)[:120]
+            log.error(f"Startup reconcile hata: {state.api_error}")
+            if not getattr(cfg, "STARTUP_CONTINUE_ON_API_FAIL", True):
+                raise
+            log.warning(
+                "API yok — bot izleme modunda devam (STARTUP_CONTINUE_ON_API_FAIL=true). "
+                "Ag/VPN veya .env API_CONNECT_TIMEOUT_SEC artirin."
+            )
     else:
         state.exchange_reconciled = True
 
@@ -364,8 +384,8 @@ async def _main_loop():
         f"max_trades={daily_guard._max_trades}"
     )
 
-    n15 = await backfill_15m_bars(96)
-    await backfill_1h_bars(48)
+    n15 = await backfill_15m_bars(int(getattr(cfg, "V3_CHART_BACKFILL_15M", 500) or 500))
+    await backfill_1h_bars(int(getattr(cfg, "V3_CHART_BACKFILL_1H", 150) or 150))
     await backfill_price_history()
 
     from feeds.trade_feed import bootstrap_cvd_from_rest
@@ -386,24 +406,66 @@ async def _main_loop():
             update_structure()
             update_cvd_snapshot()
             update_decision()
+            if state.in_position:
+                try:
+                    from execution.protection_orders import (
+                        maybe_adjust_open_tp,
+                        maybe_refresh_v3_channel_tp1,
+                        maybe_restore_entry_tp1,
+                    )
+
+                    await maybe_restore_entry_tp1(
+                        force=True,
+                        reason="Backfill sonrasi TP1 giris onarimi",
+                    )
+                    await maybe_adjust_open_tp(
+                        force=True,
+                        reason="Backfill sonrasi lokal TP1 uyarlama",
+                    )
+                    await maybe_refresh_v3_channel_tp1(
+                        force=True,
+                        reason="Backfill sonrasi V3 kanal TP1",
+                    )
+                    if state.pos_tp1 > 0:
+                        log.info(
+                            f"Koruma guncel: TP1={state.pos_tp1:.2f} "
+                            f"SL={state.pos_sl:.2f} qty_tp1={state.pos_qty_tp1:.4f}"
+                        )
+                except Exception as e:
+                    log.warning(f"Backfill TP1 uyarlama: {e}")
         else:
             from engine.breakout import refresh_levels
             from engine.breakout_readiness import log_swing_readiness
             refresh_levels(force=bool(state.in_position))
             log_swing_readiness("startup")
 
-        from engine.breakout import get_active_levels
         from engine.market_narrative import reconcile_startup
         from core.state import effective_price
 
-        lv = get_active_levels()
         px = effective_price() or state.mark_price or 0.0
-        reconcile_startup(px, float(lv.get("resistance") or 0), float(lv.get("support") or 0))
+        if getattr(cfg, "STRATEGY_V3_ENABLED", False):
+            from engine.levels_v3 import get_levels_snapshot
+
+            lv = get_levels_snapshot(px)
+            reconcile_startup(
+                px,
+                float(lv.get("active_resistance") or 0),
+                float(lv.get("active_support") or 0),
+            )
+        else:
+            from engine.breakout import get_active_levels
+
+            lv = get_active_levels(px)
+            reconcile_startup(
+                px, float(lv.get("resistance") or 0), float(lv.get("support") or 0)
+            )
 
     log.info(
         f"Yapı güncellendi: 15m={state.structure_15m} 1h={state.structure_1h}"
     )
     state.startup_grace_until = time.time() + 20
+    state.session_start_ts = time.time()
+    state.startup_warmup_done = False
 
     trade_mode = (
         "PAPER"

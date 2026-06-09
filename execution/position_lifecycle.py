@@ -139,62 +139,9 @@ def finalize_position_closed(
         except Exception as ex:
             log.warning(f"V3 adaptation: {ex}")
 
-        _arm_loss_cooldown(reason, prev_side, xpx)
-
         state.reset_position()
     finally:
         _finalizing = False
-
-
-def _arm_loss_cooldown(reason: str, side: str, exit_px: float) -> None:
-    """
-    Kayıp-sonrası artan cooldown (overtrading/churn freni).
-
-    Art arda kayıpta bekleme süresi katlanarak artar (base × ardışık, tavanlı).
-    Kazançta sayaç sıfırlanır ve cooldown temizlenir. Disiplinli trader mantığı:
-    chop'ta üst üste stop yiyince geri çekil, piyasanın çözülmesini bekle.
-    """
-    try:
-        from core.config import cfg
-
-        if not bool(getattr(cfg, "V3_LOSS_COOLDOWN_ENABLED", True)):
-            return
-        entry = float(state.pos_entry or 0)
-        xp = float(exit_px or state.mark_price or state.price or 0)
-        if entry <= 0 or xp <= 0:
-            return
-        s = str(side or "").upper()
-        if s == "LONG":
-            pnl_pct = (xp - entry) / entry * 100.0
-        elif s == "SHORT":
-            pnl_pct = (entry - xp) / entry * 100.0
-        else:
-            return
-
-        loss_thr = float(getattr(cfg, "V3_LOSS_COOLDOWN_MIN_PNL_PCT", -0.05) or -0.05)
-        if pnl_pct > loss_thr:
-            # kazanç / nötr → sayaç sıfırla, kilidi temizle
-            state.consecutive_losses = 0
-            state.loss_cooldown_until = 0.0
-            state.loss_cooldown_reason = ""
-            return
-
-        n = int(getattr(state, "consecutive_losses", 0) or 0) + 1
-        state.consecutive_losses = n
-        base = float(getattr(cfg, "V3_LOSS_COOLDOWN_BASE_SEC", 600) or 600)
-        max_mult = float(getattr(cfg, "V3_LOSS_COOLDOWN_MAX_MULT", 4) or 4)
-        mult = min(n, max_mult)
-        cd = base * mult
-        import time as _t
-
-        state.loss_cooldown_until = _t.time() + cd
-        state.loss_cooldown_reason = (
-            f"{n} ardışık kayıp (son {s} {pnl_pct:+.2f}%); "
-            f"{cd / 60.0:.0f}dk giriş molası"
-        )
-        log.info(f"Kayıp cooldown: {state.loss_cooldown_reason} reason={reason}")
-    except Exception as ex:
-        log.warning(f"loss cooldown arm: {ex}")
 
 
 async def async_finalize_position_closed(

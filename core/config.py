@@ -583,11 +583,6 @@ class Config:
     V3_SL_BAND_CLAMP_BUFFER_BPS = float(os.getenv("V3_SL_BAND_CLAMP_BUFFER_BPS", "30"))
     # Min SL mesafe tabanı: SL girişe %X'ten yakınsa giriş geçersiz (gürültü-stop önlemi)
     V3_MIN_SL_DIST_PCT = float(os.getenv("V3_MIN_SL_DIST_PCT", "0.25"))
-    # Kayıp-sonrası cooldown: art arda kayıpta artan bekleme (overtrading/churn freni)
-    V3_LOSS_COOLDOWN_ENABLED = os.getenv("V3_LOSS_COOLDOWN_ENABLED", "true").lower() in ("1", "true", "yes")
-    V3_LOSS_COOLDOWN_BASE_SEC = float(os.getenv("V3_LOSS_COOLDOWN_BASE_SEC", "600"))   # ilk kayıp: 10 dk
-    V3_LOSS_COOLDOWN_MAX_MULT = float(os.getenv("V3_LOSS_COOLDOWN_MAX_MULT", "4"))     # tavan: 40 dk
-    V3_LOSS_COOLDOWN_MIN_PNL_PCT = float(os.getenv("V3_LOSS_COOLDOWN_MIN_PNL_PCT", "-0.05"))  # bundan kötü kayıp sayılır
     # Tradeability / Conviction Gate: skor ne derse desin işlenebilirlik kapısı
     V3_TRADEABILITY_GATE_ENABLED = os.getenv("V3_TRADEABILITY_GATE_ENABLED", "true").lower() in ("1", "true", "yes")
     V3_TRADEABLE_REQUIRE_FLOW_ALIGN = os.getenv("V3_TRADEABLE_REQUIRE_FLOW_ALIGN", "true").lower() in ("1", "true", "yes")

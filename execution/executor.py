@@ -63,6 +63,16 @@ async def close_api_http_session() -> None:
     _api_http_connector = None
 
 
+def _client_timeout(total: float | None = None) -> aiohttp.ClientTimeout:
+    """Baglanti + istek suresi (yavas ag / DNS icin)."""
+    t = max(8.0, float(total or getattr(cfg, "API_REQUEST_TIMEOUT_SEC", 25) or 25))
+    conn = min(
+        max(5.0, float(getattr(cfg, "API_CONNECT_TIMEOUT_SEC", 15) or 15)),
+        t,
+    )
+    return aiohttp.ClientTimeout(total=t, connect=conn, sock_connect=conn)
+
+
 async def _http_json(
     method: str,
     url: str,
@@ -71,7 +81,8 @@ async def _http_json(
     timeout: aiohttp.ClientTimeout | None = None,
 ):
     sess = await _get_api_http_session()
-    async with sess.request(method.upper(), url, headers=headers, timeout=timeout) as r:
+    to = timeout or _client_timeout()
+    async with sess.request(method.upper(), url, headers=headers, timeout=to) as r:
         return await r.json(content_type=None)
 
 
@@ -87,12 +98,13 @@ def _now_ms() -> int:
 async def _sync_time():
     global _time_offset_ms
     last_err: Exception | None = None
-    for attempt in range(3):
+    retries = max(2, int(getattr(cfg, "API_RETRY_COUNT", 3) or 3))
+    for attempt in range(retries):
         try:
             data = await _http_json(
                 "GET",
                 f"{cfg.REST}/fapi/v1/time",
-                timeout=aiohttp.ClientTimeout(total=8),
+                timeout=_client_timeout(12),
             )
             server_ms = int(data.get("serverTime", 0))
             local_ms = int(time.time() * 1000)
@@ -102,8 +114,8 @@ async def _sync_time():
             return
         except Exception as e:
             last_err = e
-            if attempt < 2:
-                await asyncio.sleep(2)
+            if attempt < retries - 1:
+                await asyncio.sleep(1.5 * (attempt + 1))
     await close_api_http_session()
     log.warning(f"Zaman senkronu başarısız: {last_err}")
     _time_offset_ms = 0
@@ -127,9 +139,10 @@ async def _signed_request(method: str, endpoint: str, params: dict | None = None
     if not cfg.API_KEY:
         return {}
     headers = {"X-MBX-APIKEY": cfg.API_KEY}
-    timeout = aiohttp.ClientTimeout(total=10)
+    timeout = _client_timeout()
     last = {}
-    for attempt in range(2):
+    retries = max(2, int(getattr(cfg, "API_RETRY_COUNT", 3) or 3))
+    for attempt in range(retries):
         url = _signed_url(endpoint, params or {})
         try:
             last = await _http_json(
@@ -138,10 +151,20 @@ async def _signed_request(method: str, endpoint: str, params: dict | None = None
                 headers=headers,
                 timeout=timeout,
             )
+        except (asyncio.TimeoutError, aiohttp.ClientError, OSError) as e:
+            await close_api_http_session()
+            if attempt < retries - 1:
+                log.warning(
+                    f"[{method} {endpoint}] HTTP ({attempt + 1}/{retries}): {e}"
+                )
+                await asyncio.sleep(1.5 * (attempt + 1))
+                continue
+            raise
         except Exception as e:
             await close_api_http_session()
-            if attempt == 0:
+            if attempt < retries - 1:
                 log.warning(f"[{method} {endpoint}] HTTP exception: {e}")
+                await asyncio.sleep(1.5 * (attempt + 1))
                 continue
             raise
         if isinstance(last, dict) and last.get("code") is not None and int(last.get("code")) < 0:
@@ -213,8 +236,8 @@ async def fetch_balance() -> bool:
         _set_api_state(False, "api_key.csv boş veya eksik")
         return False
 
-    bt = max(8.0, float(cfg.BALANCE_API_TIMEOUT_SEC or 18.0))
-    bal_timeout = aiohttp.ClientTimeout(total=bt, connect=min(12.0, bt))
+    bt = max(8.0, float(cfg.BALANCE_API_TIMEOUT_SEC or 25.0))
+    bal_timeout = _client_timeout(bt)
     headers = {"X-MBX-APIKEY": cfg.API_KEY}
 
     try:
@@ -287,6 +310,11 @@ async def setup_api() -> bool:
     if is_paper_mode():
         from execution.paper import init_paper_session, paper_balance
         init_paper_session()
+        if not cfg.PAPER_MODE and not cfg.API_KEY:
+            log.warning(
+                "PAPER_MODE=false ama api_key.csv geçersiz/boş — "
+                "otomatik izleme (paper); canlı için geçerli API key gerekli"
+            )
         log.info(f"İzleme modu (paper) | Simüle bakiye: ${paper_balance():,.2f} USDT")
         return True
 
@@ -551,6 +579,26 @@ async def _execute_market_entry(plan: Plan, signal_id: int) -> bool:
         }
     )
     update_trade_entry(_trade_id, fill, qty_db)
+    try:
+        from botlog.db import update_trade_entry_tp1_original
+
+        update_trade_entry_tp1_original(
+            _trade_id, float(state.pos_tp1 or plan.tp1 or 0)
+        )
+    except Exception:
+        pass
+    try:
+        from engine.attribution_v3 import attach_attribution_to_trade
+
+        attach_attribution_to_trade(_trade_id)
+    except Exception:
+        pass
+    try:
+        from engine.execution_brain_v3 import snapshot_trade_brain
+
+        snapshot_trade_brain()
+    except Exception:
+        pass
     return True
 
 
@@ -774,7 +822,11 @@ async def close_position(reason: str = "signal") -> float:
         log.warning("Kapatılacak miktar yok")
         from execution.position_lifecycle import async_finalize_position_closed
 
-        await async_finalize_position_closed(reason, source="executor")
+        await async_finalize_position_closed(
+            reason,
+            source="executor",
+            exit_price=float(state.mark_price or state.price or 0),
+        )
         return 0.0
 
     side = "SELL" if state.pos_side == "LONG" else "BUY"
@@ -838,7 +890,12 @@ async def close_position(reason: str = "signal") -> float:
 
     from execution.position_lifecycle import async_finalize_position_closed
 
-    await async_finalize_position_closed(reason, source="executor")
+    await async_finalize_position_closed(
+        reason,
+        source="executor",
+        exit_price=exit_px,
+        pnl=pnl,
+    )
 
     try:
         from utils.notifier import notify_close
@@ -850,7 +907,75 @@ async def close_position(reason: str = "signal") -> float:
 
 
 async def move_to_breakeven() -> bool:
-    """TP1 sonrası: SL → TP1 seviyesi (TP1_DEFER_SL_TO_15M kapalıysa veya acil BE)."""
+    """TP1 sonrası: SL → entry (BE).
+    V3 trades: hemen BE, 15m bekleme yok.
+    Klasik trades: TP1_DEFER_SL_TO_15M=True ise 15m onay bekle.
+    """
+    if not state.in_position:
+        return False
+
+    pb = dict(state.position_breakout or {})
+    is_v3 = bool(
+        pb.get("v3_mode")
+        or pb.get("strategy") == "v3"
+        or pb.get("entry_mode") == "v3"
+    )
+
+    if is_v3 and state.pos_tp1_hit:
+        # V3: TP1 dolunca SL hemen entry'e (BE) — 15m onay bekleme.
+        from engine.position_sl import _sl_tighter, mark_sl_managed
+
+        entry = float(state.pos_entry or 0)
+        if entry <= 0:
+            return False
+        buf_bps = float(getattr(cfg, "SL_LOCK_MARK_BUFFER_BPS", 10)) / 10000.0
+        if state.pos_side == "SHORT":
+            new_sl = round(entry * (1.0 + buf_bps), 2)
+        else:
+            new_sl = round(entry * (1.0 - buf_bps), 2)
+
+        cur_sl = float(state.pos_sl or 0)
+
+        def _update_be_state(sl_val: float) -> None:
+            """BE aktif: state, pb ve thesis invalidation güncelle."""
+            state.pos_be_active = True
+            state.pos_sl = sl_val
+            pb["sl_stage"] = "trail_15m"
+            # Thesis invalidation = BE SL seviyesi.
+            # check_thesis_on_15m_close bu seviyeyi invalidation olarak kullanır:
+            # 15m kapanış BE geçince thesis fail → pozisyon kapanır → reverse değerlendirilir.
+            thesis = pb.get("thesis")
+            if isinstance(thesis, dict):
+                thesis = dict(thesis)
+                thesis["invalidation_price"] = sl_val
+                pb["thesis"] = thesis
+            state.position_breakout = pb
+
+        # SL zaten entry'den daha dar ise (örn. önceki tighten) sadece state güncelle.
+        if cur_sl > 0 and not _sl_tighter(state.pos_side, new_sl, cur_sl):
+            _update_be_state(cur_sl)
+            log.info(
+                f"V3 TP1→BE: mevcut SL {cur_sl:.2f} zaten daha dar, "
+                f"state + thesis güncellendi (entry={entry:.2f})"
+            )
+            return True
+
+        if is_paper_mode():
+            from execution.paper import paper_replace_sl
+            ok = await paper_replace_sl(new_sl, "V3 TP1→BE")
+        else:
+            from execution.protection_orders import replace_sl_algo
+            ok = await replace_sl_algo(new_sl, "V3 TP1→BE")
+
+        if ok:
+            _update_be_state(new_sl)
+            mark_sl_managed()
+            log.info(
+                f"V3 TP1→BE: SL {cur_sl:.2f} → {new_sl:.2f} (entry={entry:.2f}) "
+                f"| thesis_inv={new_sl:.2f}"
+            )
+        return ok
+
     if getattr(cfg, "TP1_DEFER_SL_TO_15M", True) and state.pos_tp1_hit:
         from execution.protection_orders import defer_runner_sl_to_15m
 
@@ -860,8 +985,6 @@ async def move_to_breakeven() -> bool:
         from execution import paper as _paper
         return await _paper.paper_move_to_breakeven()
 
-    if not state.in_position:
-        return False
     from engine.position_sl import initial_trail_sl_at_tp1, _mark, mark_sl_managed
     from execution.protection_orders import replace_sl_algo
 

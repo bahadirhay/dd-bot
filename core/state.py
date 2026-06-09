@@ -59,8 +59,6 @@ class BotState:
     last_close_source: str = ""
     last_close_side: str = ""
     last_close_price: float = 0.0
-    runner_reentry_block_until: float = 0.0
-    runner_reentry_block_reason: str = ""
     auto_trade_period: int = 0
     last_auto_trade_ts: float = 0.0
     forming_15m: dict = field(default_factory=dict)

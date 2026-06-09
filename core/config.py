@@ -764,10 +764,6 @@ class Config:
     # Eski .env değerleri TP2'yi yanlışlıkla tekrar açmasın diye kod seviyesinde kapalı.
     SEND_TP2_ORDER = False
     SL_MANAGE_COOLDOWN_SEC = float(os.getenv("SL_MANAGE_COOLDOWN_SEC", "45"))
-    # Runner SL sonrası intikam/re-entry engeli: yeni S/R sinyali için kısa bekleme.
-    RUNNER_SL_REENTRY_COOLDOWN_SEC = float(
-        os.getenv("RUNNER_SL_REENTRY_COOLDOWN_SEC", "300")
-    )
     # TP1 öncesi swing_trail kâr kilidi (varsayılan kapalı — invalidation SL korunur)
     SL_STRUCTURAL_PRE_TP1 = os.getenv("SL_STRUCTURAL_PRE_TP1", "").lower() in (
         "1",

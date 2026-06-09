@@ -45,27 +45,6 @@ def _normalize_close_reason(reason: str, exit_price: float = 0.0) -> str:
     return "runner_closed_sync"
 
 
-def _arm_runner_reentry_block(reason: str, side: str, exit_px: float) -> None:
-    if not str(reason or "").startswith("runner_"):
-        return
-    try:
-        from core.config import cfg
-
-        cd = float(getattr(cfg, "RUNNER_SL_REENTRY_COOLDOWN_SEC", 300) or 300)
-    except Exception:
-        cd = 300.0
-    if cd <= 0:
-        return
-    state.runner_reentry_block_until = time.time() + cd
-    state.runner_reentry_block_reason = (
-        f"{side} runner kapandı; yeni S/R sinyali için {cd:.0f}s bekleniyor"
-    )
-    log.info(
-        f"Runner re-entry kilidi: {side} {cd:.0f}s "
-        f"exit={float(exit_px or 0):.2f} reason={reason}"
-    )
-
-
 def finalize_position_closed(
     reason: str = "",
     source: str = "bot",
@@ -93,7 +72,6 @@ def finalize_position_closed(
         state.last_close_source = source
         state.last_close_side = prev_side
         state.last_close_price = xpx
-        _arm_runner_reentry_block(reason, prev_side, xpx)
 
         try:
             from engine.market_narrative import record_trade_exit

@@ -33,23 +33,6 @@ def _mark_traded():
     state.last_auto_trade_ts = time.time()
 
 
-def _runner_reentry_block_message(direction: str) -> str:
-    until = float(getattr(state, "runner_reentry_block_until", 0) or 0)
-    now = time.time()
-    if until <= now:
-        if until > 0:
-            state.runner_reentry_block_until = 0.0
-            state.runner_reentry_block_reason = ""
-        return ""
-    left = max(until - now, 0.0)
-    side = str(getattr(state, "last_close_side", "") or "?")
-    px = float(getattr(state, "last_close_price", 0) or 0)
-    reason = str(getattr(state, "runner_reentry_block_reason", "") or "")
-    detail = reason or f"{side} runner SL sonrası yeni S/R sinyali bekleniyor"
-    price_txt = f" exit={px:.2f}" if px > 0 else ""
-    return f"{detail}; {direction} girişi {left:.0f}s kilitli{price_txt}"
-
-
 async def execute_entry(details: dict, source: str = "breakout") -> bool:
     """Risk planı + borsa/paper emri."""
     from core.config import reload_keys
@@ -80,16 +63,6 @@ async def execute_entry(details: dict, source: str = "breakout") -> bool:
     reload_keys()
     direction = (details.get("direction") or "").upper()
     if not direction:
-        return False
-
-    runner_block = _runner_reentry_block_message(direction)
-    if runner_block:
-        log.info(f"Giriş atlandı — {runner_block} ({source})")
-        state.no_entry_reason = f"[RUNNER_REENTRY_WAIT] {runner_block}"
-        if getattr(cfg, "STRATEGY_V3_ENABLED", False) and details.get("v3_mode"):
-            from engine.no_trade_log_v3 import log_execute_block
-
-            log_execute_block("runner_reentry_wait", runner_block, source=source)
         return False
 
     is_reverse = bool(

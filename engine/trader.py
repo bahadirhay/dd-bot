@@ -72,6 +72,48 @@ def _startup_warmup_block() -> str:
     return "açılış ısınması: " + ", ".join(parts) + " (veri tazeleniyor)"
 
 
+def _reclaim_trigger(side: str, candle: dict | None = None) -> bool:
+    """
+    Intra-bar seviye-reclaim olayı: fiyat destek/dirençte + 1m order-flow teyidi
+    + mikro-onay (1m kapanış seviyenin doğru tarafında). Sadece TETİK görevi —
+    asıl giriş kararı (RR/edge/tradeability/min-SL) decision pipeline'da verildi.
+    """
+    if not bool(getattr(cfg, "V3_RECLAIM_ENTRY_ENABLED", True)):
+        return False
+    side = (side or "").upper()
+    px = float(state.mark_price or state.price or 0)
+    if px <= 0 or side not in ("LONG", "SHORT"):
+        return False
+    try:
+        from engine.breakout import get_active_levels
+        from engine.cvd_v3 import get_cvd_snapshot
+        from engine.v3_common import bars_1m
+
+        lv = get_active_levels(px) or {}
+        ref_s = float(lv.get("support") or 0)
+        ref_r = float(lv.get("resistance") or 0)
+        cdir = str((get_cvd_snapshot() or {}).get("direction") or "").upper()
+        near = float(getattr(cfg, "V3_RECLAIM_NEAR_PCT", 0.0025) or 0.0025)
+
+        last = candle if candle else ((bars_1m(2) or [{}])[-1])
+        c = float(last.get("close", 0) or 0)
+        o = float(last.get("open", 0) or 0)
+
+        if side == "LONG" and ref_s > 0:
+            at_level = px <= ref_s * (1.0 + near)
+            flow_ok = cdir == "BULL"                 # 1m akış alıma döndü
+            micro = c > 0 and c >= ref_s and c >= o  # kapanış destek üstü + yeşil
+            return at_level and flow_ok and micro
+        if side == "SHORT" and ref_r > 0:
+            at_level = px >= ref_r * (1.0 - near)
+            flow_ok = cdir == "BEAR"
+            micro = c > 0 and c <= ref_r and c <= o
+            return at_level and flow_ok and micro
+    except Exception as ex:
+        log.warning(f"reclaim trigger: {ex}")
+    return False
+
+
 async def _maybe_runner_reversal_exit() -> bool:
     """
     RANGE runner: kendi hedefine (SHORT→destek, LONG→direnç) ulaştı VE order-flow
@@ -447,6 +489,17 @@ async def on_1m_market(candle: dict) -> None:
         update_cvd_snapshot()
         snap = update_decision()
         state.no_entry_reason = str(snap.get("reason") or snap.get("action") or "")
+        # Intra-bar seviye-reclaim girişi: karar zaten LONG/SHORT + tüm kapıları
+        # geçtiyse VE fiyat destek/dirençte akış teyidiyle reclaim yaptıysa,
+        # 15m kapanışı beklemeden gir (bounce'u kenardan yakala).
+        act = str(snap.get("action") or "")
+        if act in ("LONG", "SHORT") and _reclaim_trigger(act, candle):
+            details = dict(snap.get("details") or {})
+            if details:
+                log.info(
+                    f"[RECLAIM] {act} seviye-reclaim + akış teyidi → intra-bar giriş"
+                )
+                await execute_entry(details, source="v3-reclaim")
         return
 
     mode = getattr(cfg, "ENTRY_MODE", "break").lower()

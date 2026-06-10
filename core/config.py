@@ -587,6 +587,9 @@ class Config:
     V3_RUNNER_REVERSAL_EXIT_ENABLED = os.getenv("V3_RUNNER_REVERSAL_EXIT_ENABLED", "true").lower() in ("1", "true", "yes")
     V3_RUNNER_TARGET_NEAR_PCT = float(os.getenv("V3_RUNNER_TARGET_NEAR_PCT", "0.002"))   # hedefe %0.2 yakınlık
     V3_RUNNER_REVERSAL_CVD = float(os.getenv("V3_RUNNER_REVERSAL_CVD", "4000"))          # ters akış eşiği
+    # Intra-bar seviye-reclaim girişi: destek/dirençte + 1m akış teyidi → 15m beklemeden gir
+    V3_RECLAIM_ENTRY_ENABLED = os.getenv("V3_RECLAIM_ENTRY_ENABLED", "true").lower() in ("1", "true", "yes")
+    V3_RECLAIM_NEAR_PCT = float(os.getenv("V3_RECLAIM_NEAR_PCT", "0.0025"))   # seviyeye %0.25 yakınlık
     # Min SL mesafe tabanı: SL girişe %X'ten yakınsa giriş geçersiz (gürültü-stop önlemi)
     V3_MIN_SL_DIST_PCT = float(os.getenv("V3_MIN_SL_DIST_PCT", "0.25"))
     # Yapı skoru kaynağı: "swing" (BOS/CHoCH, anlık) | "collapse" (eski, yapışkan)

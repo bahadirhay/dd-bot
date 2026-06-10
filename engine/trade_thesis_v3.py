@@ -1242,6 +1242,24 @@ def _swing_low_fallback_long_thesis(
     return thesis
 
 
+def _effective_bias_dir(levels: dict) -> str:
+    """Etkin yön: 'SHORT' (bearish) | 'LONG' (bullish) | '' (belirsiz)."""
+    ms = levels.get("market_state") or {}
+    col = ms.get("collapse") or {}
+    dom = str(col.get("dominant_bias") or "").lower()
+    if "bear" in dom:
+        return "SHORT"
+    if "bull" in dom:
+        return "LONG"
+    st = ms.get("structure") or {}
+    d = str(st.get("direction") or st.get("trend") or "").lower()
+    if "down" in d or "bear" in d:
+        return "SHORT"
+    if "up" in d or "bull" in d:
+        return "LONG"
+    return ""
+
+
 def build_trade_theses(
     *,
     levels: dict,
@@ -1427,6 +1445,40 @@ def build_trade_theses(
             _t.reason = (
                 f"{_t.reason}; CVD ekstrem ters-akış veto "
                 f"(ratio={_cvd_ratio:.2f}, {_side_key} engellendi)"
+            )
+
+    # ── Trend-hizalı + iyi RR override (DB kalibrasyonu) ─────────────────────
+    # Backtest (48h, n=7595): edge = RR + trend-hizası, prob DEĞİL. range_check
+    # trend-hizalı RR≥2 setupları gereksiz WEAK'liyordu. Bunları geri VALID yap —
+    # AMA CVD ters-akış vetosu ve ters-trend koruması korunur.
+    if bool(getattr(cfg, "V3_TREND_ALIGNED_OVERRIDE", True)):
+        _bias = _effective_bias_dir(levels)
+        _amin = float(getattr(cfg, "V3_ALIGNED_MIN_RR", 2.0) or 2.0)
+        for _sk, _t in (("short", out.get("short")), ("long", out.get("long"))):
+            if not isinstance(_t, TradeThesis) or _t.state != "WEAK":
+                continue
+            _dir = _sk.upper()
+            if _dir != _bias:
+                continue  # yalnız trend-hizalı
+            if float(getattr(_t, "rr", 0) or 0) < _amin:
+                continue
+            if _dir == "SHORT" and _cvd_ratio >= _veto_hi:
+                continue  # akış alımda → short'u geri alma
+            if _dir == "LONG" and _cvd_ratio <= _veto_lo:
+                continue
+            if "ters-akış veto" in str(_t.reason or ""):
+                continue  # CVD vetosunu ezme
+            ent = _t.entry if isinstance(_t.entry, dict) else {}
+            has_geo = float(ent.get("sl", 0) or 0) > 0 and (
+                float(ent.get("tp1", 0) or 0) > 0 or float(ent.get("tp2", 0) or 0) > 0
+            )
+            if not has_geo:
+                continue
+            _t.state = "VALID"
+            ent["valid"] = True
+            _t.reason = (
+                f"{_t.reason}; trend-hizali RR>={_amin:.1f} override "
+                f"(kalibrasyon: prob degil RR+hiza)"
             )
 
     candidates = [

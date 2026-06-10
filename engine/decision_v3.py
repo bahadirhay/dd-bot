@@ -811,7 +811,22 @@ def _update_decision_probabilistic(
         scores.get("prob_long_pct" if action == "LONG" else "prob_short_pct") or 0
     ) / 100.0
     _min_edge = float(getattr(cfg, "V3_THESIS_MIN_PROB", 0.55) or 0.55)
-    if _side_prob < _min_edge:
+    # DB kalibrasyonu: trend-hizalı + RR≥2 setuplarda prob skoru kazançla korele
+    # DEĞİL (prob %50 olan setuplar %86 kazanıyor). Bu yüzden trend-hizalı güçlü-RR
+    # girişlerde prob kapısını uygulama — edge RR+hizada. Ters-trend'de kapı kalır.
+    _sel_rr = float(getattr(selected_thesis, "rr", 0) or 0) if selected_thesis else 0.0
+    _aligned_dir = ""
+    _ms = (levels.get("market_state") or {})
+    _dom = str((_ms.get("collapse") or {}).get("dominant_bias") or "").lower()
+    if "bear" in _dom:
+        _aligned_dir = "SHORT"
+    elif "bull" in _dom:
+        _aligned_dir = "LONG"
+    _aligned_strong = (
+        action == _aligned_dir
+        and _sel_rr >= float(getattr(cfg, "V3_ALIGNED_MIN_RR", 2.0) or 2.0)
+    )
+    if _side_prob < _min_edge and not _aligned_strong:
         snap = {
             "action": "WAIT",
             "reason": (

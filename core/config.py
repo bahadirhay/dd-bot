@@ -173,10 +173,14 @@ class Config:
         "true",
         "yes",
     )
-    V3_SR_SKIP_PERSIST = os.getenv("V3_SR_SKIP_PERSIST", "false").lower() in (
+    V3_SR_SKIP_PERSIST = os.getenv("V3_SR_SKIP_PERSIST", "true").lower() in (
         "1",
         "true",
         "yes",
+    )
+    # Persist destegi fiyattan bu kadar uzaksa kirli say (or. 1601 @ 1621)
+    V3_PERSIST_MAX_SUPPORT_GAP_PCT = float(
+        os.getenv("V3_PERSIST_MAX_SUPPORT_GAP_PCT", "0.012")
     )
     V3_SR_ACTIVE_BAND = os.getenv("V3_SR_ACTIVE_BAND", "true").lower() in (
         "1",
@@ -620,6 +624,10 @@ class Config:
     V3_TRADEABLE_CVD_CUM_COUNTER = float(os.getenv("V3_TRADEABLE_CVD_CUM_COUNTER", "4000"))  # kümülatif akış counterflow eşiği
     # Tez yolu min edge: yön olasılığı bunun altındaysa giriş yok (50/50 = edge yok)
     V3_THESIS_MIN_PROB = float(os.getenv("V3_THESIS_MIN_PROB", "0.55"))
+    # DB kalibrasyonu: trend-hizalı + RR≥X setuplarda prob kapısı uygulanmaz
+    # (edge RR+hizada; prob skoru kazançla korele değil). Ters-trend'de kapı kalır.
+    V3_TREND_ALIGNED_OVERRIDE = os.getenv("V3_TREND_ALIGNED_OVERRIDE", "true").lower() in ("1", "true", "yes")
+    V3_ALIGNED_MIN_RR = float(os.getenv("V3_ALIGNED_MIN_RR", "2.0"))
     # Açılış ısınması (veri tazeliği): canlı akış + ilk 5m kapanış beklenir
     V3_STARTUP_WARMUP_ENABLED = os.getenv("V3_STARTUP_WARMUP_ENABLED", "true").lower() in ("1", "true", "yes")
     V3_STARTUP_WARMUP_MIN_SEC = float(os.getenv("V3_STARTUP_WARMUP_MIN_SEC", "150"))

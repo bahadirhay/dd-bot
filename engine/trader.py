@@ -72,6 +72,56 @@ def _startup_warmup_block() -> str:
     return "açılış ısınması: " + ", ".join(parts) + " (veri tazeleniyor)"
 
 
+async def _maybe_runner_reversal_exit() -> bool:
+    """
+    RANGE runner: kendi hedefine (SHORT→destek, LONG→direnç) ulaştı VE order-flow
+    ters döndüyse runner'ı market'te kapat. Hem kârı kilitler hem slot'u boşaltır
+    (ters yön açılabilsin). Yalnız TP1 sonrası; dönüş teyidi yoksa pozisyon kalır.
+    """
+    if not bool(getattr(cfg, "V3_RUNNER_REVERSAL_EXIT_ENABLED", True)):
+        return False
+    if not (state.in_position and state.pos_tp1_hit):
+        return False
+    side = (state.pos_side or "").upper()
+    mark = float(state.mark_price or state.price or 0)
+    if mark <= 0 or side not in ("LONG", "SHORT"):
+        return False
+    try:
+        from engine.breakout import get_active_levels
+        from engine.cvd_v3 import get_cvd_snapshot
+
+        lv = get_active_levels(mark) or {}
+        ref_s = float(lv.get("support") or 0)
+        ref_r = float(lv.get("resistance") or 0)
+        cvd = get_cvd_snapshot() or {}
+        cum = float(cvd.get("cumulative", 0) or 0)
+        cdir = str(cvd.get("direction") or "").upper()
+        near = float(getattr(cfg, "V3_RUNNER_TARGET_NEAR_PCT", 0.002) or 0.002)
+        thr = float(getattr(cfg, "V3_RUNNER_REVERSAL_CVD", 4000) or 4000)
+
+        hit_target = reversed_flow = False
+        if side == "SHORT" and ref_s > 0:
+            hit_target = mark <= ref_s * (1.0 + near)
+            reversed_flow = (cdir == "BULL") or (cum >= thr)
+        elif side == "LONG" and ref_r > 0:
+            hit_target = mark >= ref_r * (1.0 - near)
+            reversed_flow = (cdir == "BEAR") or (cum <= -thr)
+
+        if hit_target and reversed_flow:
+            from execution.executor import close_position
+
+            log.info(
+                f"[RUNNER-REVERSAL] {side} hedefe ulastı "
+                f"(mark={mark:.2f} S={ref_s:.2f} R={ref_r:.2f}) + akış ters "
+                f"(cvd={cum:+.0f} {cdir}) → runner kapatılıyor, slot serbest"
+            )
+            await close_position(reason="runner_target_reversal")
+            return True
+    except Exception as ex:
+        log.warning(f"runner reversal exit: {ex}")
+    return False
+
+
 async def execute_entry(details: dict, source: str = "breakout") -> bool:
     """Risk planı + borsa/paper emri."""
     from core.config import reload_keys
@@ -370,6 +420,10 @@ async def on_15m_market(candle: dict) -> None:
 async def on_1m_market(candle: dict) -> None:
     """1m — trend güncelle; sadece eski trend/impulse modunda giriş."""
     if state.in_position and state.pos_tp1_hit:
+        # RANGE runner: hedefe ulaşıp akış ters dönerse kapat (slot serbest)
+        if await _maybe_runner_reversal_exit():
+            update_trend("1m")
+            return
         from execution.protection_orders import apply_5m_runner_sl_confirm
 
         await apply_5m_runner_sl_confirm(candle)

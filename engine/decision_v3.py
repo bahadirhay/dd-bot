@@ -874,6 +874,39 @@ def _update_decision_probabilistic(
     min_rr = float(getattr(cfg, "V3_MIN_RR_RATIO", 2.0) or 2.0)
     rr = float(side_entry.get("rr", 0) or 0)
 
+    # --- DEJENERE GEOMETRI KORUMASI (tek kapi, kaynak fark etmez) ---
+    # 1200-RR mayini: SL girise yapisik (risk~0) ya da TP girisin ters tarafinda.
+    # Hangi aday yol uretirse uretsin burada elenir; saçma giris engellenir.
+    _g_px = float(side_entry.get("price", px) or px)
+    _g_sl = float(side_entry.get("sl", 0) or 0)
+    _g_tp = float(side_entry.get("tp1", 0) or 0)
+    _min_sl_pct = float(getattr(cfg, "V3_MIN_SL_DIST_PCT", 0.25) or 0.25) / 100.0
+    _rr_cap = float(getattr(cfg, "V3_RR_SANITY_CAP", 10.0) or 10.0)
+    _geo_bad = ""
+    if _g_px > 0 and _g_sl > 0 and _g_tp > 0:
+        if abs(_g_sl - _g_px) < _g_px * _min_sl_pct:
+            _geo_bad = f"SL girise yapisik ({abs(_g_sl - _g_px):.2f})"
+        elif action == "SHORT" and (_g_sl <= _g_px or _g_tp >= _g_px):
+            _geo_bad = "SHORT ters geometri (SL<=giris ya da TP>=giris)"
+        elif action == "LONG" and (_g_sl >= _g_px or _g_tp <= _g_px):
+            _geo_bad = "LONG ters geometri (SL>=giris ya da TP<=giris)"
+    if _geo_bad or rr > _rr_cap:
+        if rr > _rr_cap and not _geo_bad:
+            _geo_bad = f"RR makul-disi ({rr:.1f}>{_rr_cap:.0f})"
+        snap = {
+            "action": "WAIT",
+            "reason": f"Dejenere geometri: {action} {_geo_bad}",
+            "levels": levels,
+            "structure": structure,
+            "scenario": scenario,
+            "cvd": cvd,
+            "entry": side_entry,
+            "direction_scores": scores,
+            "trade_thesis": thesis_snapshot(theses) if theses else {},
+            "reject_reason": "BAD_GEOMETRY",
+        }
+        return _commit_decision(snap, flow_tag=flow_tag, flow_force=flow_force)
+
     # Dar bant + güçlü yön: RR eşiğini gevşet (1.5). Dar kanalda RR düşük ama
     # isabet yüksek; SHORT/LONG skoru baskınsa düşük RR'yi kabul et.
     _prob = float(

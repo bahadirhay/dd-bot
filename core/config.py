@@ -612,6 +612,9 @@ class Config:
     V3_RECLAIM_NEAR_PCT = float(os.getenv("V3_RECLAIM_NEAR_PCT", "0.0025"))   # seviyeye %0.25 yakınlık
     # Min SL mesafe tabanı: SL girişe %X'ten yakınsa giriş geçersiz (gürültü-stop önlemi)
     V3_MIN_SL_DIST_PCT = float(os.getenv("V3_MIN_SL_DIST_PCT", "0.25"))
+    # Dejenere RR tavani: bu degerin uzerindeki RR daima geometri bozuklugu (SL~0)
+    # demektir; nihai kapida elenir (1200-RR mayini korumasi).
+    V3_RR_SANITY_CAP = float(os.getenv("V3_RR_SANITY_CAP", "10.0"))
     # Yapı skoru kaynağı: "swing" (BOS/CHoCH, anlık) | "collapse" (eski, yapışkan)
     V3_STRUCTURE_SOURCE = os.getenv("V3_STRUCTURE_SOURCE", "swing")
     V3_STRUCT_PIVOT_BARS = int(os.getenv("V3_STRUCT_PIVOT_BARS", "60"))

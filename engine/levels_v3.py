@@ -1636,6 +1636,60 @@ def _make_extreme_fallback_level(price_level: float, kind: str) -> dict:
     }
 
 
+def _fill_band_from_ladder(active: dict, price: float) -> dict | None:
+    """
+    Band eksikse (fiyat tüm pivotların dışında) tarihsel merdivenden en yakın
+    GERÇEK seviyeyle doldur. Ayrıca stabil makro kanalı günceller.
+    """
+    if price <= 0:
+        return None
+    try:
+        from engine.level_ladder_v3 import (
+            build_level_ladder,
+            nearest_below,
+            nearest_above,
+            stable_macro_channel,
+        )
+    except Exception:
+        return None
+
+    ladder = build_level_ladder(price)
+    if not ladder:
+        return None
+
+    sup = dict(active.get("support") or {})
+    res = dict(active.get("resistance") or {})
+    s_px = float(sup.get("price", 0) or 0)
+    r_px = float(res.get("price", 0) or 0)
+
+    if not (0 < s_px < price):
+        nb = nearest_below(price, ladder)
+        if nb:
+            sup = _make_extreme_fallback_level(nb["price"], "support")
+    if not (r_px > price):
+        na = nearest_above(price, ladder)
+        if na:
+            res = _make_extreme_fallback_level(na["price"], "resistance")
+
+    s_px = float((sup or {}).get("price", 0) or 0)
+    r_px = float((res or {}).get("price", 0) or 0)
+    if not (0 < s_px < price < r_px):
+        return None
+
+    out = _finalize_active_pair(sup, res, price)
+    out["ladder_fill"] = True
+    ch = stable_macro_channel(price, ladder)
+    if ch.get("support") and ch.get("resistance"):
+        out["macro_support"] = float(ch["support"])
+        out["macro_resistance"] = float(ch["resistance"])
+        out["macro_range_valid"] = True
+    log.info(
+        f"[LEVELS] ladder-fill px={price:.2f} S={s_px:.2f} R={r_px:.2f} "
+        f"makro={ch.get('support')}/{ch.get('resistance')} (tarihsel merdiven)"
+    )
+    return out
+
+
 def _apply_extreme_bar_fallback(bars: list[dict], price: float) -> dict | None:
     """Güçlü seviye yoksa son N×15m mumun en düşük low / en yüksek high geçici S/R."""
     lookback = max(int(getattr(cfg, "V3_EXTREME_FALLBACK_BARS", 24) or 24), 12)
@@ -2542,8 +2596,19 @@ def update_levels() -> dict:
         elif not sr_only:
             active = _resolve_band_outside_channel(merged, price, bars15)
     if not active.get("support") or not active.get("resistance"):
-        use_extreme = getattr(cfg, "V3_EXTREME_FALLBACK_ENABLED", False) or not getattr(
-            cfg, "V3_ZONE_LIFECYCLE", True
+        # Önce tarihsel merdiveni tara — geçmişten en yakın GERÇEK seviye
+        # (kaba 24-bar sentetik band yerine). Fiyat tüm pivotların altına/üstüne
+        # çıksa bile bot kör kalmaz.
+        if bool(getattr(cfg, "V3_LADDER_ENABLED", True)):
+            filled = _fill_band_from_ladder(active, price)
+            if filled is not None:
+                active = filled
+        use_extreme = (
+            (not active.get("support") or not active.get("resistance"))
+            and (
+                getattr(cfg, "V3_EXTREME_FALLBACK_ENABLED", False)
+                or not getattr(cfg, "V3_ZONE_LIFECYCLE", True)
+            )
         )
         if use_extreme:
             extreme = _apply_extreme_bar_fallback(bars15, price)

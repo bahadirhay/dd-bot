@@ -558,6 +558,16 @@ class Config:
     V3_STRUCTURE_15M_MIN_MOVE_PCT = float(os.getenv("V3_STRUCTURE_15M_MIN_MOVE_PCT", "0.0004"))
     # Güçlü seviye yokken geçici S/R: son N×15m mumun en düşük low / en yüksek high
     V3_EXTREME_FALLBACK_BARS = int(os.getenv("V3_EXTREME_FALLBACK_BARS", "24"))
+    # Tarihsel seviye merdiveni: band boşalınca geçmişten en yakın gerçek seviyeyi tara
+    V3_LADDER_ENABLED = os.getenv("V3_LADDER_ENABLED", "true").lower() in ("1", "true", "yes")
+    V3_LADDER_15M_BARS = int(os.getenv("V3_LADDER_15M_BARS", "500"))
+    V3_LADDER_1H_BARS = int(os.getenv("V3_LADDER_1H_BARS", "200"))
+    V3_LADDER_PIVOT_LEFT = int(os.getenv("V3_LADDER_PIVOT_LEFT", "3"))
+    V3_LADDER_PIVOT_RIGHT = int(os.getenv("V3_LADDER_PIVOT_RIGHT", "3"))
+    V3_LADDER_MERGE_PCT = float(os.getenv("V3_LADDER_MERGE_PCT", "0.0015"))
+    # Stabil makro kanal: güçlü tarihsel seviyelerden kalıcı band (titreşim önler)
+    V3_MACRO_MIN_TOUCHES = int(os.getenv("V3_MACRO_MIN_TOUCHES", "2"))
+    V3_MACRO_BREAK_BUFFER_BPS = float(os.getenv("V3_MACRO_BREAK_BUFFER_BPS", "15"))
     V3_CVD_WINDOW_TRADES = int(os.getenv("V3_CVD_WINDOW_TRADES", "500"))
     V3_WICK_STRENGTH_MULTIPLIER = float(
         os.getenv("V3_WICK_STRENGTH_MULTIPLIER", "2.0")

@@ -1100,18 +1100,22 @@ def _apply_trade_band_overlay(snap: dict, price: float, bars15: list[dict]) -> d
         prev_active = (state.v3_levels or {}).get("active") or {}
         prev_res = prev_active.get("resistance") or {}
         prev_tr = float(prev_res.get("price", 0) or 0)
-        if prev_tr > 0 and abs(tr - prev_tr) > 0.5:
+        # Ladder otoritesi açıkken overlay'in trade R'si nihai değil (son-söz
+        # _validate_band_against_ladder); yanıltıcı log basma.
+        _ladder_authority = bool(getattr(cfg, "V3_LADDER_ENABLED", True))
+        if not _ladder_authority and prev_tr > 0 and abs(tr - prev_tr) > 0.5:
             log.info(
                 f"[LEVELS] trade R guncellendi {prev_tr:.2f} -> {tr:.2f} px={price:.2f}"
             )
         traverse = _trade_channel_traversed(bars15, ts, tr)
         state.v3_trade_channel_traversed = traverse
         trade["channel_traversed"] = traverse
-        log.info(
-            f"[LEVELS] trade bant px={price:.2f} S={ts:.2f} R={tr:.2f} "
-            f"zone={trade.get('zone')} | macro S={ms:.2f} R={mr:.2f}"
-            f"{' | traverse=evet' if traverse else ''}"
-        )
+        if not _ladder_authority:
+            log.info(
+                f"[LEVELS] trade bant px={price:.2f} S={ts:.2f} R={tr:.2f} "
+                f"zone={trade.get('zone')} | macro S={ms:.2f} R={mr:.2f}"
+                f"{' | traverse=evet' if traverse else ''}"
+            )
     return snap
 
 

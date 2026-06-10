@@ -461,11 +461,17 @@ async def _execute_market_entry(plan: Plan, signal_id: int) -> bool:
         log.error(f"Miktar borsa adımına göre sıfır: plan={plan.qty_total}")
         return False
     plan.qty_total = qty
-    plan.qty_tp1 = await round_qty_float(plan.qty_tp1)
-    plan.qty_tp2 = await round_qty_float(plan.qty_total - plan.qty_tp1)
-    if plan.qty_tp2 < 0.001:
-        plan.qty_tp1 = qty
+    # Tam-runner modu: sabit TP yok (ne TP1 ne TP2). Tum pozisyon iz-suren SL
+    # (structural/swing_trail, her dongu daralir) + runner-reversal ile gider.
+    if bool(getattr(cfg, "V3_FULL_RUNNER_NO_TP", True)):
+        plan.qty_tp1 = 0.0
         plan.qty_tp2 = 0.0
+    else:
+        plan.qty_tp1 = await round_qty_float(plan.qty_tp1)
+        plan.qty_tp2 = await round_qty_float(plan.qty_total - plan.qty_tp1)
+        if plan.qty_tp2 < 0.001:
+            plan.qty_tp1 = qty
+            plan.qty_tp2 = 0.0
 
     r = await _req(
         "POST",
@@ -536,7 +542,12 @@ async def _execute_market_entry(plan: Plan, signal_id: int) -> bool:
             f"Algo TP1 gönderilemedi — plan={plan.tp1:.2f} "
             f"ayarlı={tp1_live:.2f}"
         )
-    if not bool(getattr(cfg, "SEND_TP2_ORDER", False)):
+    if bool(getattr(cfg, "V3_FULL_RUNNER_NO_TP", True)):
+        log.info(
+            "Koruma: yalniz SL — sabit TP yok (tam-runner). "
+            "Tum pozisyon iz-suren SL (structural/swing trail) + runner-reversal"
+        )
+    elif not bool(getattr(cfg, "SEND_TP2_ORDER", False)):
         log.info(
             f"Koruma: SL + TP1 (%{cfg.TP1_PCT*100:.0f} kapat) — "
             f"TP2 emri yok, runner 15m trail SL"

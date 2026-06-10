@@ -922,6 +922,36 @@ def _update_decision_probabilistic(
     if _narrow and _strong_dir:
         min_rr = float(getattr(cfg, "V3_MIN_RR_NARROW_STRONG", 1.5) or 1.5)
 
+    # --- KENAR-KONUM KAPISI (gec giris korumasi) ---
+    # Fade tezleri (REJECTION) yalniz bandin faded kenarina yakinken acilsin.
+    # DB analizi: kenardan giren tek pozisyon kazandi (#67 @R), orta/dip/tepe
+    # girenler kaybetti/chopladi. Orta-banddan kovalamayi kes.
+    if bool(getattr(cfg, "V3_RANGE_EDGE_GATE", True)):
+        _ttype = str(getattr(selected_thesis, "thesis_type", "") or "").upper()
+        _is_fade = "REJECTION" in _ttype
+        _edge = _br if action == "SHORT" else (_bs if action == "LONG" else 0.0)
+        _g2_px = float(side_entry.get("price", px) or px)
+        if _is_fade and _edge > 0 and _g2_px > 0:
+            _edge_dist = abs(_edge - _g2_px) / _g2_px * 100.0
+            _edge_max = float(getattr(cfg, "V3_RANGE_EDGE_MAX_DIST_PCT", 0.35) or 0.35)
+            if _edge_dist > _edge_max:
+                snap = {
+                    "action": "WAIT",
+                    "reason": (
+                        f"Gec giris: {action} {_ttype} kenardan uzak "
+                        f"({_edge_dist:.2f}%>{_edge_max:.2f}%) — orta-band kovalama yok"
+                    ),
+                    "levels": levels,
+                    "structure": structure,
+                    "scenario": scenario,
+                    "cvd": cvd,
+                    "entry": side_entry,
+                    "direction_scores": scores,
+                    "trade_thesis": thesis_snapshot(theses) if theses else {},
+                    "reject_reason": "LATE_ENTRY",
+                }
+                return _commit_decision(snap, flow_tag=flow_tag, flow_force=flow_force)
+
     if not side_entry.get("valid") and rr < min_rr:
         snap = {
             "action": "WAIT",

@@ -1391,7 +1391,11 @@ async def _fill_missing_levels() -> None:
         state.pos_tp1 = tp1
     if tp2 > 0:
         state.pos_tp2 = tp2
-    if state.pos_qty_tp1 <= 0 and state.pos_qty > 0:
+    if (
+        not bool(getattr(cfg, "V3_FULL_RUNNER_NO_TP", True))
+        and state.pos_qty_tp1 <= 0
+        and state.pos_qty > 0
+    ):
         state.pos_qty_tp1 = round(state.pos_qty * cfg.TP1_PCT, 4)
         state.pos_qty_tp2 = round(max(state.pos_qty - state.pos_qty_tp1, 0), 4)
 

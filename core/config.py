@@ -615,6 +615,13 @@ class Config:
     # Dejenere RR tavani: bu degerin uzerindeki RR daima geometri bozuklugu (SL~0)
     # demektir; nihai kapida elenir (1200-RR mayini korumasi).
     V3_RR_SANITY_CAP = float(os.getenv("V3_RR_SANITY_CAP", "10.0"))
+    # Kenar-konum kapisi: fade (REJECTION) tezleri yalniz faded kenara bu kadar
+    # yakinken acilsin. Orta-banddan gec/kovalama giris engellenir.
+    V3_RANGE_EDGE_GATE = os.getenv("V3_RANGE_EDGE_GATE", "true").lower() == "true"
+    V3_RANGE_EDGE_MAX_DIST_PCT = float(os.getenv("V3_RANGE_EDGE_MAX_DIST_PCT", "0.35"))
+    # Tam-runner: sabit TP yok (TP1/TP2 emri atlanir). Tum pozisyon iz-suren SL
+    # (structural/swing_trail, her dongu daralir) + runner-reversal ile kapanir.
+    V3_FULL_RUNNER_NO_TP = os.getenv("V3_FULL_RUNNER_NO_TP", "true").lower() == "true"
     # Yapı skoru kaynağı: "swing" (BOS/CHoCH, anlık) | "collapse" (eski, yapışkan)
     V3_STRUCTURE_SOURCE = os.getenv("V3_STRUCTURE_SOURCE", "swing")
     V3_STRUCT_PIVOT_BARS = int(os.getenv("V3_STRUCT_PIVOT_BARS", "60"))

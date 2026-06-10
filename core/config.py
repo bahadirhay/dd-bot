@@ -620,8 +620,10 @@ class Config:
     V3_RANGE_EDGE_GATE = os.getenv("V3_RANGE_EDGE_GATE", "true").lower() == "true"
     V3_RANGE_EDGE_MAX_DIST_PCT = float(os.getenv("V3_RANGE_EDGE_MAX_DIST_PCT", "0.35"))
     # Tam-runner: sabit TP yok (TP1/TP2 emri atlanir). Tum pozisyon iz-suren SL
-    # (structural/swing_trail, her dongu daralir) + runner-reversal ile kapanir.
-    V3_FULL_RUNNER_NO_TP = os.getenv("V3_FULL_RUNNER_NO_TP", "true").lower() == "true"
+    # ile kapanir. KAPALI: backtest (n=41) full-runner'in MFE'yi geri verdigini
+    # gosterdi; TP1 partial (%50 kenar-hedefte) kar-kilidi daha iyi. Acmak icin
+    # V3_FULL_RUNNER_NO_TP=true.
+    V3_FULL_RUNNER_NO_TP = os.getenv("V3_FULL_RUNNER_NO_TP", "false").lower() == "true"
     # Yapı skoru kaynağı: "swing" (BOS/CHoCH, anlık) | "collapse" (eski, yapışkan)
     V3_STRUCTURE_SOURCE = os.getenv("V3_STRUCTURE_SOURCE", "swing")
     V3_STRUCT_PIVOT_BARS = int(os.getenv("V3_STRUCT_PIVOT_BARS", "60"))

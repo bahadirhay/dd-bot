@@ -417,7 +417,7 @@ class Config:
     )
     V3_INERTIA_MIN_CONTINUATION = int(os.getenv("V3_INERTIA_MIN_CONTINUATION", "58"))
     V3_TRAP_MIN_REACTION = float(os.getenv("V3_TRAP_MIN_REACTION", "0.45"))
-    V3_EXTREME_FALLBACK_ENABLED = os.getenv("V3_EXTREME_FALLBACK_ENABLED", "false").lower() in (
+    V3_EXTREME_FALLBACK_ENABLED = os.getenv("V3_EXTREME_FALLBACK_ENABLED", "true").lower() in (
         "1",
         "true",
         "yes",

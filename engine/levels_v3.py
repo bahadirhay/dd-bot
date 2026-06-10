@@ -551,6 +551,208 @@ def _pick_trade_resistance_candidate(
     return best_price, best_lvl
 
 
+def _persist_support_too_stale(support_px: float, price: float) -> bool:
+    """Persist destegi fiyattan cok uzaksa (or. 1601 @ px 1621) makro kirli sayilir."""
+    ps = float(support_px or 0)
+    px = float(price or 0)
+    if ps <= 0 or px <= 0 or ps >= px:
+        return False
+    max_gap = float(getattr(cfg, "V3_PERSIST_MAX_SUPPORT_GAP_PCT", 0.012) or 0.012)
+    return (px - ps) / px > max_gap
+
+
+def _ladder_macro_band_candidate(price: float) -> dict:
+    """Tarihsel merdivenden stabil/anlamli makro kanal — kirli persist yerine."""
+    px = float(price or 0)
+    if px <= 0 or not bool(getattr(cfg, "V3_LADDER_ENABLED", True)):
+        return {}
+    try:
+        from engine.level_ladder_v3 import (
+            build_level_ladder,
+            meaningful_band,
+            stable_macro_channel,
+        )
+    except Exception:
+        return {}
+    ladder = build_level_ladder(px)
+    if not ladder:
+        return {}
+    ch = stable_macro_channel(px, ladder)
+    ms = float(ch.get("support", 0) or 0)
+    mr = float(ch.get("resistance", 0) or 0)
+    if ms > 0 and mr > ms and ms < px < mr:
+        out = _finalize_active_pair(
+            _ladder_level_dict(ms, "support"),
+            _ladder_level_dict(mr, "resistance"),
+            px,
+        )
+        out["ladder_macro"] = True
+        return out
+    mb = meaningful_band(px, ladder)
+    if not mb:
+        return {}
+    ns = float(mb.get("support", 0) or 0)
+    nr = float(mb.get("resistance", 0) or 0)
+    if not (0 < ns < px < nr):
+        return {}
+    out = _finalize_active_pair(
+        _ladder_level_dict(ns, "support"),
+        _ladder_level_dict(nr, "resistance"),
+        px,
+    )
+    out["ladder_macro"] = True
+    return out
+
+
+def _deepen_support_from_meaningful_band(
+    active: dict,
+    price: float,
+) -> dict:
+    """
+    Dar pivot bandi (or. 1612/1621) icin destegi merdiven/demand_liq tabanina
+    indir (or. 1606); direnc ayni kalir — gercek islem kanali.
+    """
+    px = float(price or 0)
+    if px <= 0 or not active:
+        return active
+    s_lvl = dict(active.get("support") or {})
+    r_lvl = dict(active.get("resistance") or {})
+    s = float(s_lvl.get("price", 0) or 0)
+    r = float(r_lvl.get("price", 0) or 0)
+    if not (0 < s < px < r):
+        return active
+    min_w = px * float(getattr(cfg, "V3_BAND_MIN_WIDTH_PCT", 0.008) or 0.008)
+    min_sep = max(px * float(getattr(cfg, "V3_SR_ACTIVE_MIN_SEP_PCT", 0.0025) or 0.0025), 4.0)
+    if (r - s) >= max(min_w, min_sep):
+        return active
+    if not bool(getattr(cfg, "V3_LADDER_ENABLED", True)):
+        return active
+
+    ns = 0.0
+    try:
+        from engine.level_ladder_v3 import meaningful_band
+
+        mb = meaningful_band(px)
+        if mb:
+            ns = float(mb.get("support", 0) or 0)
+    except Exception:
+        ns = 0.0
+
+    layers = getattr(state, "v3_zone_layers", None) or {}
+    dl = layers.get("demand_liq") or {}
+    dl_px = float(dl.get("center") or dl.get("low") or 0)
+    if dl_px > 0 and dl_px < px and (ns <= 0 or abs(dl_px - px) < abs(ns - px)):
+        if dl_px < s or ns <= 0:
+            ns = dl_px
+
+    if not (0 < ns < s and ns < px):
+        return active
+    if (r - ns) < max(min_w, min_sep) * 0.5:
+        return active
+
+    new_s = _ladder_level_dict(ns, "support")
+    out = _finalize_active_pair(new_s, r_lvl, px)
+    for key in (
+        "sr_active_band",
+        "locked",
+        "layer_band",
+        "trade_band",
+        "macro_support",
+        "macro_resistance",
+        "macro_range_valid",
+        "min_width_expanded",
+        "entry_band_frozen",
+        "channel_traversed",
+        "zone",
+    ):
+        if key in active:
+            out[key] = active[key]
+    out["ladder_fill"] = True
+    out["support_deepened"] = True
+    log.info(
+        f"[LEVELS] destek derinlestirildi {s:.2f} -> {ns:.2f} "
+        f"R={r:.2f} px={px:.2f} (anlamli kanal)"
+    )
+    return out
+
+
+def _support_from_ladder_fallback(price: float) -> dict | None:
+    """Tarihsel merdivenden fiyatin altindaki en yakin destek (impulse sonrasi macro yerine)."""
+    if price <= 0:
+        return None
+    try:
+        from engine.level_ladder_v3 import build_level_ladder, nearest_below
+    except Exception:
+        return None
+    ladder = build_level_ladder(price)
+    if not ladder:
+        return None
+    nb = nearest_below(price, ladder)
+    if not nb:
+        return None
+    px = float(nb.get("price", 0) or 0)
+    if not (0 < px < price):
+        return None
+    return _ladder_level_dict(px, "support")
+
+
+def _prefer_ladder_support(
+    s_lvl: dict,
+    price: float,
+    macro_sup: dict | None,
+) -> dict:
+    """Macro zemin (or. 1601) yerine anlamli merdiven/demand_liq destegini tercih et."""
+    px = float(price or 0)
+    cur_px = float(s_lvl.get("price", 0) or 0)
+    macro_px = float((macro_sup or {}).get("price", 0) or 0)
+
+    meaningful_px = 0.0
+    if bool(getattr(cfg, "V3_LADDER_ENABLED", True)):
+        try:
+            from engine.level_ladder_v3 import meaningful_band
+
+            mb = meaningful_band(px)
+            if mb:
+                meaningful_px = float(mb.get("support", 0) or 0)
+        except Exception:
+            meaningful_px = 0.0
+
+    layers = getattr(state, "v3_zone_layers", None) or {}
+    dl = layers.get("demand_liq") or {}
+    dl_px = float(dl.get("center") or dl.get("low") or 0)
+    if dl_px > 0 and dl_px < px:
+        if meaningful_px <= 0 or abs(dl_px - px) <= abs(meaningful_px - px) + 2.0:
+            meaningful_px = dl_px
+
+    pick_px = meaningful_px
+    if pick_px <= 0 or pick_px >= px:
+        ladder_sup = _support_from_ladder_fallback(px)
+        if ladder_sup:
+            pick_px = float(ladder_sup.get("price", 0) or 0)
+        else:
+            return s_lvl
+    if pick_px <= 0 or pick_px >= px:
+        return s_lvl
+
+    # Macro taban veya dar pivot ustunde anlamli taban varsa onu kullan
+    if macro_px > 0 and pick_px > macro_px + 0.5:
+        out = _ladder_level_dict(pick_px, "support")
+        out["ladder_fill"] = True
+        return out
+    if cur_px <= 0 or macro_px == cur_px:
+        if pick_px > macro_px + 0.5 or macro_px <= 0:
+            out = _ladder_level_dict(pick_px, "support")
+            out["ladder_fill"] = True
+            return out
+    # Dar bant: en yakin pivot yerine daha derin anlamli destek
+    if 0 < cur_px < px and pick_px < cur_px - 0.5:
+        out = _ladder_level_dict(pick_px, "support")
+        out["ladder_fill"] = True
+        out["support_deepened"] = True
+        return out
+    return s_lvl
+
+
 def _resolve_trade_band(
     macro_active: dict,
     merged: list[dict],
@@ -604,11 +806,18 @@ def _resolve_trade_band(
             if str(l.get("kind") or "") == "support"
             and 0 < float(l.get("price", 0) or 0) < px
         ]
-        if not sups:
-            return None
-        s_lvl = max(sups, key=lambda x: float(x.get("price", 0) or 0))
+        if sups:
+            s_lvl = max(sups, key=lambda x: float(x.get("price", 0) or 0))
+        else:
+            ladder_only = _support_from_ladder_fallback(px)
+            if ladder_only:
+                s_lvl = ladder_only
+                s_lvl["ladder_fill"] = True
+            else:
+                return None
     else:
         s_lvl = dict(macro_sup)
+    s_lvl = _prefer_ladder_support(s_lvl, px, macro_sup)
     trade_s = float(s_lvl.get("price", 0) or 0)
 
     candidates = _trade_band_resistance_candidates(
@@ -805,12 +1014,25 @@ def _resolve_macro_band_for_overlay(
                 px,
             )
 
+    ladder_macro = _ladder_macro_band_candidate(px)
+    if ladder_macro:
+        lms = float((ladder_macro.get("support") or {}).get("price", 0) or 0)
+        lmr = float((ladder_macro.get("resistance") or {}).get("price", 0) or 0)
+        if lms > 0 and lmr > lms and (trade_r <= 0 or lmr > trade_r + 0.5):
+            return ladder_macro
+
     persisted = _widen_persisted_macro_from_layers(
         _restore_persisted_active(), px, bars15, merged
     )
     ps = float((persisted.get("support") or {}).get("price", 0) or 0)
     pr = float((persisted.get("resistance") or {}).get("price", 0) or 0)
-    if ps > 0 and pr > ps and pr > trade_r + 0.5 and ps < px < pr:
+    if (
+        ps > 0
+        and pr > ps
+        and pr > trade_r + 0.5
+        and ps < px < pr
+        and not _persist_support_too_stale(ps, px)
+    ):
         return _finalize_active_pair(
             persisted["support"], persisted["resistance"], px
         )
@@ -861,6 +1083,15 @@ def _apply_trade_band_overlay(snap: dict, price: float, bars15: list[dict]) -> d
         sr_active=snap.get("active"),
     )
     if trade:
+        cur_s = float((cur_active.get("support") or {}).get("price", 0) or 0)
+        trade_s_new = float((trade.get("support") or {}).get("price", 0) or 0)
+        if cur_active.get("ladder_fill") and cur_s > 0 and trade_s_new > 0:
+            if trade_s_new < cur_s - 0.5 and cur_s < price:
+                trade["support"] = cur_active.get("support")
+                trade["ladder_fill"] = True
+            elif cur_s > trade_s_new and cur_s < price:
+                trade["support"] = cur_active.get("support")
+                trade["ladder_fill"] = True
         snap["active"] = trade
         ts = float((trade.get("support") or {}).get("price", 0) or 0)
         tr = float((trade.get("resistance") or {}).get("price", 0) or 0)
@@ -1317,6 +1548,11 @@ def _persist_band_usable(
     width = pr - ps
     if width < _band_min_width(price, bars15):
         return False
+    if _persist_support_too_stale(ps, price):
+        ladder_macro = _ladder_macro_band_candidate(price)
+        lms = float((ladder_macro.get("support") or {}).get("price", 0) or 0)
+        if lms > ps + 0.5:
+            return False
     if merged and getattr(cfg, "V3_ACTIVE_BAND_HTF", False):
         macro_w = _htf_macro_band_width(merged, price, bars15)
         if macro_w > 0 and width < macro_w * 0.65:
@@ -1682,6 +1918,63 @@ def _enforce_min_band_width(active: dict, price: float) -> dict:
     log.info(
         f"[LEVELS] dar bant genisletildi {r - s:.1f}pt -> {nr - ns:.1f}pt "
         f"S={ns:.2f} R={nr:.2f} (tarihsel merdiven)"
+    )
+    return out
+
+
+def _validate_band_against_ladder(active: dict, price: float) -> dict:
+    """
+    Aktif band kenarları touch-validated (≥V3_BAND_MIN_TOUCHES dokunuş) GERÇEK
+    seviyeler mi? Değilse merdivenden anlamlı banda (meaningful_band) snap'le.
+    Tek-wick / gürültü pivotu / likidite-katmanı kenarlarını eler — "1606.11
+    destek değil" sorununun çözümü. HER döngüde çalışır (sadece fallback değil).
+    """
+    if price <= 0 or not bool(getattr(cfg, "V3_LADDER_ENABLED", True)):
+        return active
+    try:
+        from engine.level_ladder_v3 import build_level_ladder, meaningful_band
+    except Exception:
+        return active
+    ladder = build_level_ladder(price)
+    if not ladder:
+        return active
+    min_touch = int(getattr(cfg, "V3_BAND_MIN_TOUCHES", 2) or 2)
+    validated = [l for l in ladder if l["touches"] >= min_touch]
+    if not validated:
+        return active
+    tol = price * float(getattr(cfg, "V3_LADDER_MERGE_PCT", 0.0015) or 0.0015)
+    min_w = price * float(getattr(cfg, "V3_BAND_MIN_WIDTH_PCT", 0.008) or 0.008)
+    s = float((active.get("support") or {}).get("price", 0) or 0)
+    r = float((active.get("resistance") or {}).get("price", 0) or 0)
+
+    def _is_validated(px0: float) -> bool:
+        return any(abs(px0 - l["price"]) <= tol for l in validated)
+
+    band_ok = (
+        0 < s < price < r
+        and _is_validated(s)
+        and _is_validated(r)
+        and (r - s) >= min_w * 0.6
+    )
+    if band_ok:
+        return active  # kenarlar zaten gerçek seviye
+
+    mb = meaningful_band(price, ladder)
+    if not mb:
+        return active
+    ns, nr = float(mb["support"]), float(mb["resistance"])
+    if not (0 < ns < price < nr):
+        return active
+    out = _finalize_active_pair(
+        _ladder_level_dict(ns, "support"), _ladder_level_dict(nr, "resistance"), price
+    )
+    for k in ("macro_support", "macro_resistance", "macro_range_valid", "trade_band"):
+        if k in active:
+            out[k] = active[k]
+    out["ladder_validated"] = True
+    log.info(
+        f"[LEVELS] S/R touch-validated snap: S {s:.2f}->{ns:.2f} R {r:.2f}->{nr:.2f} "
+        f"(>={min_touch} dokunus, tarihsel merdiven)"
     )
     return out
 
@@ -2682,7 +2975,9 @@ def update_levels() -> dict:
         active = _apply_active_level_lock(active, merged, price, lock_prev, bars15)
         active = _resync_band_levels(active, merged)
         active = _ensure_active_covers_price(active, merged, price, bars15)
-        # Dejenere dar band (ör. 6pt) → tarihsel merdivenden anlamlı banda genişlet
+        # Aktif band kenarlarını touch-validated gerçek seviyelere snap'le
+        # (gürültü/tek-wick kenar elenir), sonra dar bandı genişlet.
+        active = _validate_band_against_ladder(active, price)
         active = _enforce_min_band_width(active, price)
     active = _apply_position_entry_band_lock(active, price, merged)
     _attach_display_outer_levels(active, merged, price, prev_active)
@@ -2727,6 +3022,11 @@ def update_levels() -> dict:
             s = float((active.get("support") or {}).get("price", 0) or 0)
             r = float((active.get("resistance") or {}).get("price", 0) or 0)
             n_sr = sum(1 for l in merged if l.get("sr_source"))
+            active = _deepen_support_from_meaningful_band(active, price)
+            active = _enforce_min_band_width(active, price)
+            snap["active"] = active
+            s = float((active.get("support") or {}).get("price", 0) or 0)
+            r = float((active.get("resistance") or {}).get("price", 0) or 0)
             log.info(
                 f"[LEVELS] SR pivot bant px={price:.2f} S={s:.2f} R={r:.2f} "
                 f"({n_sr} pivot cizgi)"
@@ -2752,6 +3052,9 @@ def update_levels() -> dict:
         snap["active"] = active
     snap = _apply_trade_band_overlay(snap, price, bars15)
     active = snap.get("active") or active
+    active = _deepen_support_from_meaningful_band(active, price)
+    active = _enforce_min_band_width(active, price)
+    snap["active"] = active
     state.v3_levels = snap
     macro_persist = snap.get("macro_band") or {}
     if not macro_persist.get("support"):
@@ -3498,8 +3801,9 @@ def band_is_stable(
 
 def get_breakout_reference_levels(price: float = 0.0) -> dict:
     """
-    Kirilim referansi: son bilinen oturum bandi (persist) veya guncel aktif S/R.
-    range_valid gerekmez — destek alti kapanis buradaki ref_s ile olculur.
+    Kirilim referansi: guncel aktif trade bandi (oncelik).
+    Persist yalnizca aktif bant yoksa ve fiyat icinde gecerliyse kullanilir;
+    makro persist (or. R=1688) dar trade bandini ezmemeli.
     """
     px = float(price or effective_price() or state.mark_price or state.price or 0)
     snap = state.v3_levels or {}
@@ -3511,12 +3815,28 @@ def get_breakout_reference_levels(price: float = 0.0) -> dict:
     ps = float((persisted.get("support") or {}).get("price", 0) or 0)
     pr = float((persisted.get("resistance") or {}).get("price", 0) or 0)
 
-    ref_s = ps if ps > 0 else s
-    ref_r = pr if pr > 0 else r
-    source = "session" if ps > 0 else "active"
-    if ref_r <= ref_s and r > s:
+    ref_s, ref_r = s, r
+    source = "active"
+    active_ok = s > 0 and r > s and (px <= 0 or s < px < r)
+
+    if active_ok:
         ref_s, ref_r = s, r
         source = "active"
+    elif (
+        ps > 0
+        and pr > ps
+        and (px <= 0 or ps < px < pr)
+        and not _persist_support_too_stale(ps, px)
+        and (pr - ps) < max(px * 0.06, 80.0)
+    ):
+        ref_s, ref_r = ps, pr
+        source = "session"
+    elif s > 0 and r > s:
+        ref_s, ref_r = s, r
+        source = "active"
+    elif ps > 0 and pr > ps:
+        ref_s, ref_r = ps, pr
+        source = "session"
 
     return {
         "support": ref_s,

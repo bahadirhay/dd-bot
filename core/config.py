@@ -619,6 +619,11 @@ class Config:
     # yakinken acilsin. Orta-banddan gec/kovalama giris engellenir.
     V3_RANGE_EDGE_GATE = os.getenv("V3_RANGE_EDGE_GATE", "true").lower() == "true"
     V3_RANGE_EDGE_MAX_DIST_PCT = float(os.getenv("V3_RANGE_EDGE_MAX_DIST_PCT", "0.35"))
+    # Onayli RANGE'de kenar mean-reversion simetrik: TF-trend (ayi/boga) tek
+    # basina destekte-LONG / dirençte-SHORT'u veto edemez; yalniz ters CVD bloklar.
+    # Kanal teyidi (channel_traversed+range_valid) sarti var; gercek kirilimda
+    # zaten BREAKOUT_* devreye girer.
+    V3_RANGE_SYMMETRIC_EDGE = os.getenv("V3_RANGE_SYMMETRIC_EDGE", "true").lower() == "true"
     # Tam-runner: sabit TP yok (TP1/TP2 emri atlanir). Tum pozisyon iz-suren SL
     # ile kapanir. KAPALI: backtest (n=41) full-runner'in MFE'yi geri verdigini
     # gosterdi; TP1 partial (%50 kenar-hedefte) kar-kilidi daha iyi. Acmak icin

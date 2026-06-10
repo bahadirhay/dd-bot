@@ -3090,6 +3090,13 @@ def update_levels() -> dict:
     active = snap.get("active") or active
     active = _deepen_support_from_meaningful_band(active, price)
     active = _enforce_min_band_width(active, price)
+    # --- TEK KAYNAK OTORİTESİ ---
+    # Overlay ve diğer reaktif katmanlar bittikten SONRA, touch-validated tarihsel
+    # merdiven SON SÖZ. Böylece hiçbir modül validated band'ı ezemez (R=1661 vs
+    # 1647.94 çakışması biter); ardından histerezis ile titreşim söner.
+    if not bool(active.get("entry_band_frozen")):
+        active = _validate_band_against_ladder(active, price)
+        active = _debounce_active_band(active, price)
     snap["active"] = active
     state.v3_levels = snap
     macro_persist = snap.get("macro_band") or {}

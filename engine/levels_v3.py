@@ -1922,6 +1922,40 @@ def _enforce_min_band_width(active: dict, price: float) -> dict:
     return out
 
 
+def _debounce_active_band(active: dict, price: float) -> dict:
+    """
+    Band histerezisi: fiyat tutulan bandın (tamponlu) içinde kaldıkça bandı SABİT
+    tut. Pivot üstünde cent-oynamasıyla S/R'nin flip etmesini (her tick yeniden
+    çizim) engeller. Fiyat kenarın tamponu dışına çıkınca yeni band kabul edilir.
+    """
+    from core.state import state as _st
+
+    if price <= 0 or not bool(getattr(cfg, "V3_BAND_HYSTERESIS_ENABLED", True)):
+        return active
+    sup = active.get("support") or {}
+    res = active.get("resistance") or {}
+    s = float(sup.get("price", 0) or 0)
+    r = float(res.get("price", 0) or 0)
+    if not (0 < s < price < r):
+        return active  # geçersiz band — dokunma
+    buf = price * float(getattr(cfg, "V3_BAND_HYSTERESIS_BPS", 25) or 25) / 10000.0
+    hold = dict(getattr(_st, "v3_band_hold", {}) or {})
+    hs = float(hold.get("s_px", 0) or 0)
+    hr = float(hold.get("r_px", 0) or 0)
+    if 0 < hs < hr and (hs - buf) <= price <= (hr + buf):
+        # Fiyat hâlâ tutulan bandın tamponlu içinde → bandı KORU (titreşim yok)
+        out = dict(active)
+        out["support"] = dict(hold.get("sup") or sup)
+        out["resistance"] = dict(hold.get("res") or res)
+        out["band_held"] = True
+        return out
+    # Fiyat band dışına çıktı → yeni bandı kabul et + sabitle
+    _st.v3_band_hold = {
+        "s_px": s, "r_px": r, "sup": dict(sup), "res": dict(res),
+    }
+    return active
+
+
 def _validate_band_against_ladder(active: dict, price: float) -> dict:
     """
     Aktif band kenarları touch-validated (≥V3_BAND_MIN_TOUCHES dokunuş) GERÇEK
@@ -2979,6 +3013,8 @@ def update_levels() -> dict:
         # (gürültü/tek-wick kenar elenir), sonra dar bandı genişlet.
         active = _validate_band_against_ladder(active, price)
         active = _enforce_min_band_width(active, price)
+        # Histerezis: pivot üstünde cent-oynamasıyla band flip etmesin
+        active = _debounce_active_band(active, price)
     active = _apply_position_entry_band_lock(active, price, merged)
     _attach_display_outer_levels(active, merged, price, prev_active)
     liq_map = update_liquidity_map(merged, price, bars15)

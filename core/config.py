@@ -575,6 +575,9 @@ class Config:
     # Anlamlı band: dejenere dar band yerine min genişlik + çok-dokunuşlu seviye
     V3_BAND_MIN_WIDTH_PCT = float(os.getenv("V3_BAND_MIN_WIDTH_PCT", "0.008"))  # min %0.8 genişlik
     V3_BAND_MIN_TOUCHES = int(os.getenv("V3_BAND_MIN_TOUCHES", "2"))           # destek/direnç ≥2 dokunuş
+    # Band histerezisi: fiyat pivot üstünde oynarken band her tick flip etmesin
+    V3_BAND_HYSTERESIS_ENABLED = os.getenv("V3_BAND_HYSTERESIS_ENABLED", "true").lower() in ("1", "true", "yes")
+    V3_BAND_HYSTERESIS_BPS = float(os.getenv("V3_BAND_HYSTERESIS_BPS", "25"))   # kenar tamponu (~4pt @1640)
     V3_CVD_WINDOW_TRADES = int(os.getenv("V3_CVD_WINDOW_TRADES", "500"))
     V3_WICK_STRENGTH_MULTIPLIER = float(
         os.getenv("V3_WICK_STRENGTH_MULTIPLIER", "2.0")

@@ -63,6 +63,8 @@ class BotState:
     last_auto_trade_ts: float = 0.0
     session_start_ts: float = 0.0
     startup_warmup_done: bool = False
+    v3_macro_channel: dict = field(default_factory=dict)
+    v3_band_hold: dict = field(default_factory=dict)
     forming_15m: dict = field(default_factory=dict)
     intra_15m_summary: dict = field(default_factory=dict)
     _intra_last_log_pct: float = 0.0

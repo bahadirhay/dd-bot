@@ -97,6 +97,44 @@ def nearest_above(price: float, ladder: list[dict] | None = None) -> dict | None
     return min(cands, key=lambda x: x["price"]) if cands else None
 
 
+def meaningful_band(price: float, ladder: list[dict] | None = None) -> dict | None:
+    """
+    Anlamlı işlem bandı: çok-dokunuşlu (≥V3_BAND_MIN_TOUCHES) gerçek seviyelerden,
+    minimum genişlik (V3_BAND_MIN_WIDTH_PCT) sağlanana kadar dışarı yürüyerek.
+    Dejenere 6-puanlık mikro-band yerine gerçek kanal döndürür.
+    """
+    if price <= 0:
+        return None
+    ladder = ladder if ladder is not None else build_level_ladder(price)
+    if not ladder:
+        return None
+    min_touch = int(getattr(cfg, "V3_BAND_MIN_TOUCHES", 2) or 2)
+    min_w = price * float(getattr(cfg, "V3_BAND_MIN_WIDTH_PCT", 0.008) or 0.008)
+    strong = [l for l in ladder if l["touches"] >= min_touch] or ladder
+
+    below = sorted([l["price"] for l in strong if l["price"] < price], reverse=True)
+    above = sorted([l["price"] for l in strong if l["price"] > price])
+    if not below or not above:
+        return None
+
+    s, r = below[0], above[0]
+    bi = ai = 0
+    while (r - s) < min_w and (bi + 1 < len(below) or ai + 1 < len(above)):
+        gap_dn = (s - below[bi + 1]) if bi + 1 < len(below) else float("inf")
+        gap_up = (above[ai + 1] - r) if ai + 1 < len(above) else float("inf")
+        if gap_up <= gap_dn and ai + 1 < len(above):
+            ai += 1
+            r = above[ai]
+        elif bi + 1 < len(below):
+            bi += 1
+            s = below[bi]
+        else:
+            break
+    if (r - s) < min_w * 0.5:
+        return None
+    return {"support": round(s, 2), "resistance": round(r, 2)}
+
+
 def stable_macro_channel(price: float, ladder: list[dict] | None = None) -> dict:
     """
     Stabil makro kanal: güçlü tarihsel seviyelerden fiyatı çevreleyen kalıcı band.

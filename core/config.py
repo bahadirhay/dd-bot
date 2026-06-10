@@ -568,6 +568,9 @@ class Config:
     # Stabil makro kanal: güçlü tarihsel seviyelerden kalıcı band (titreşim önler)
     V3_MACRO_MIN_TOUCHES = int(os.getenv("V3_MACRO_MIN_TOUCHES", "2"))
     V3_MACRO_BREAK_BUFFER_BPS = float(os.getenv("V3_MACRO_BREAK_BUFFER_BPS", "15"))
+    # Anlamlı band: dejenere dar band yerine min genişlik + çok-dokunuşlu seviye
+    V3_BAND_MIN_WIDTH_PCT = float(os.getenv("V3_BAND_MIN_WIDTH_PCT", "0.008"))  # min %0.8 genişlik
+    V3_BAND_MIN_TOUCHES = int(os.getenv("V3_BAND_MIN_TOUCHES", "2"))           # destek/direnç ≥2 dokunuş
     V3_CVD_WINDOW_TRADES = int(os.getenv("V3_CVD_WINDOW_TRADES", "500"))
     V3_WICK_STRENGTH_MULTIPLIER = float(
         os.getenv("V3_WICK_STRENGTH_MULTIPLIER", "2.0")

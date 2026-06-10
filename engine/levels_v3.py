@@ -1636,6 +1636,56 @@ def _make_extreme_fallback_level(price_level: float, kind: str) -> dict:
     }
 
 
+def _ladder_level_dict(price_level: float, kind: str) -> dict:
+    """Merdiven seviyesinden sade level dict (extreme-fallback flag'i olmadan)."""
+    return {
+        "price": round(float(price_level), 2),
+        "kind": kind,
+        "strength": "MEDIUM",
+        "score": 6,
+        "source": "ladder",
+    }
+
+
+def _enforce_min_band_width(active: dict, price: float) -> dict:
+    """
+    Aktif band dejenere derecede darsa (ör. 6pt) tarihsel merdivenden anlamlı
+    banda genişlet. Yalnız band min genişliğin altındaysa devreye girer.
+    """
+    if price <= 0 or not bool(getattr(cfg, "V3_LADDER_ENABLED", True)):
+        return active
+    s = float((active.get("support") or {}).get("price", 0) or 0)
+    r = float((active.get("resistance") or {}).get("price", 0) or 0)
+    if not (0 < s < price < r):
+        return active
+    min_w = price * float(getattr(cfg, "V3_BAND_MIN_WIDTH_PCT", 0.008) or 0.008)
+    if (r - s) >= min_w:
+        return active
+    try:
+        from engine.level_ladder_v3 import meaningful_band
+
+        mb = meaningful_band(price)
+    except Exception:
+        mb = None
+    if not mb:
+        return active
+    ns, nr = float(mb["support"]), float(mb["resistance"])
+    if not (0 < ns < price < nr) or (nr - ns) <= (r - s):
+        return active
+    out = _finalize_active_pair(
+        _ladder_level_dict(ns, "support"), _ladder_level_dict(nr, "resistance"), price
+    )
+    for k in ("macro_support", "macro_resistance", "macro_range_valid", "trade_band"):
+        if k in active:
+            out[k] = active[k]
+    out["min_width_expanded"] = True
+    log.info(
+        f"[LEVELS] dar bant genisletildi {r - s:.1f}pt -> {nr - ns:.1f}pt "
+        f"S={ns:.2f} R={nr:.2f} (tarihsel merdiven)"
+    )
+    return out
+
+
 def _fill_band_from_ladder(active: dict, price: float) -> dict | None:
     """
     Band eksikse (fiyat tüm pivotların dışında) tarihsel merdivenden en yakın
@@ -1646,6 +1696,7 @@ def _fill_band_from_ladder(active: dict, price: float) -> dict | None:
     try:
         from engine.level_ladder_v3 import (
             build_level_ladder,
+            meaningful_band,
             nearest_below,
             nearest_above,
             stable_macro_channel,
@@ -1657,19 +1708,22 @@ def _fill_band_from_ladder(active: dict, price: float) -> dict | None:
     if not ladder:
         return None
 
-    sup = dict(active.get("support") or {})
-    res = dict(active.get("resistance") or {})
-    s_px = float(sup.get("price", 0) or 0)
-    r_px = float(res.get("price", 0) or 0)
-
-    if not (0 < s_px < price):
-        nb = nearest_below(price, ladder)
-        if nb:
-            sup = _make_extreme_fallback_level(nb["price"], "support")
-    if not (r_px > price):
-        na = nearest_above(price, ladder)
-        if na:
-            res = _make_extreme_fallback_level(na["price"], "resistance")
+    # Önce anlamlı band (min genişlik + çok-dokunuş); yoksa en yakına düş.
+    mb = meaningful_band(price, ladder)
+    if mb:
+        sup = _ladder_level_dict(mb["support"], "support")
+        res = _ladder_level_dict(mb["resistance"], "resistance")
+    else:
+        sup = dict(active.get("support") or {})
+        res = dict(active.get("resistance") or {})
+        if not (0 < float(sup.get("price", 0) or 0) < price):
+            nb = nearest_below(price, ladder)
+            if nb:
+                sup = _ladder_level_dict(nb["price"], "support")
+        if not (float(res.get("price", 0) or 0) > price):
+            na = nearest_above(price, ladder)
+            if na:
+                res = _ladder_level_dict(na["price"], "resistance")
 
     s_px = float((sup or {}).get("price", 0) or 0)
     r_px = float((res or {}).get("price", 0) or 0)
@@ -2628,6 +2682,8 @@ def update_levels() -> dict:
         active = _apply_active_level_lock(active, merged, price, lock_prev, bars15)
         active = _resync_band_levels(active, merged)
         active = _ensure_active_covers_price(active, merged, price, bars15)
+        # Dejenere dar band (ör. 6pt) → tarihsel merdivenden anlamlı banda genişlet
+        active = _enforce_min_band_width(active, price)
     active = _apply_position_entry_band_lock(active, price, merged)
     _attach_display_outer_levels(active, merged, price, prev_active)
     liq_map = update_liquidity_map(merged, price, bars15)

@@ -726,6 +726,12 @@ class Config:
     # Ogrenme dongusu: her pozisyon kapanisinda PerfCtx'i yeniden hesapla
     # (win-rate -> risk carpani). Idempotent; seansi yeniden baslatmaya gerek yok.
     V3_PERF_CTX_ON_CLOSE = os.getenv("V3_PERF_CTX_ON_CLOSE", "true").lower() in ("1", "true", "yes")
+    # TP1 partial ulasilabilirlik cap'i (bps). Veri: TP1 60-90bps tam-band hic
+    # vurulmuyor; ~55-60 tatli nokta. RR'yi bozmaz (RR tp2 ile), gerisi runner.
+    V3_TP1_MAX_BPS = float(os.getenv("V3_TP1_MAX_BPS", "60"))
+    # Chop devre kesici: N ardisik zayif-cikis zarari -> yeni giris COOLDOWN sn durur.
+    V3_CHOP_BREAKER_N = int(os.getenv("V3_CHOP_BREAKER_N", "4"))
+    V3_CHOP_BREAKER_COOLDOWN_SEC = float(os.getenv("V3_CHOP_BREAKER_COOLDOWN_SEC", "1800"))
     # (a) Borsa SL'sini felaket tavani mesafesine genislet (gurultu otesi). Boyut
     # risk-bazli kuculur; genis SL ile RR yeniden dogrulanir (sub-min-RR dusulur).
     V3_WIDEN_SL_TO_CAP = os.getenv("V3_WIDEN_SL_TO_CAP", "false").lower() in ("1", "true", "yes")

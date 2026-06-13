@@ -1,7 +1,8 @@
 """
 engine/entry_v3.py
 
-RANGE/BREAKOUT: band S/R ile TP/RR; SL = yapisal 15m swing (+ buffer), yoksa S/R disi.
+RANGE fade: band S/R ile TP/RR; SL = aktif seviye alti/ustu + bar-noise buffer.
+BREAKOUT: SL = yapisal 15m swing (+ buffer).
 Diger: liquidity grab, zone test, breakout retest.
 
 DÜZELTME: CVD "confirmed" zorunluluğu kaldırıldı — CVD yön filtresi yeterli.
@@ -13,11 +14,11 @@ from core.config import cfg
 from core.state import state, effective_price
 from core.logger import get_logger
 from engine.cvd_v3 import update_cvd_snapshot
-from engine.levels_v3 import get_levels_snapshot, update_levels, zone_for_price
+from engine.levels_v3 import get_levels_snapshot, update_levels
 from engine.scenario_v3 import get_scenario_snapshot
 from engine.structure_levels import _swing_prices, nearest_swing_above, nearest_swing_below
 from engine.structure_thresholds import sl_buffer_bps, breakout_close_beyond
-from engine.v3_common import bars_15m, bars_1m
+from engine.v3_common import bars_15m, bars_1m, calculate_channel_zone
 
 log = get_logger("EntryV3")
 
@@ -65,6 +66,39 @@ def _nearest_swing_high_above_level(level: float) -> float:
         (p for p in _swing_prices(state.swing_highs_15m or []) if p > level * 1.0002),
     )
     return above[0] if above else 0.0
+
+
+def _fade_level_buffer_px(anchor: float, entry: float) -> float:
+    """Fade invalidation — seviye otesi nefes (sl_buffer_bps / bar noise)."""
+    px = float(entry or anchor or 0)
+    if px <= 0:
+        return 4.0
+    anchor_px = float(anchor or px)
+    return max(anchor_px * sl_buffer_bps(px) / 10000.0, px * 0.00025)
+
+
+def _fade_sl_long(entry: float, support: float) -> float:
+    """Fade LONG: destek alti + buffer (yapisal swing degil)."""
+    if support <= 0 or entry <= 0:
+        return entry * 0.9998
+    buf = _fade_level_buffer_px(support, entry)
+    sl = support - buf
+    min_risk = entry * 0.0008
+    if sl >= entry - min_risk:
+        sl = entry - min_risk
+    return sl
+
+
+def _fade_sl_short(entry: float, resistance: float) -> float:
+    """Fade SHORT: direnc ustu + buffer (yapisal swing degil)."""
+    if resistance <= 0 or entry <= 0:
+        return entry * 1.0002
+    buf = _fade_level_buffer_px(resistance, entry)
+    sl = resistance + buf
+    min_risk = entry * 0.0008
+    if sl <= entry + min_risk:
+        sl = entry + min_risk
+    return sl
 
 
 def _structural_sl_long(entry: float, ref_level: float, fallback: float) -> float:
@@ -170,13 +204,27 @@ def _calc_score_long_above_resistance(
     }
 
 
+def _cap_tp1_reachable(direction: str, entry: float, tp1: float) -> float:
+    """
+    TP1 partial'i ULASILABILIR mesafeye cek (V3_TP1_MAX_BPS). Veri+backtest: TP1
+    60-90bps'te (tam-band) neredeyse hic vurulmuyor; ~55bps tatli nokta. RR'yi
+    bozmaz (RR tp2 ile hesaplanir); yalniz partial'i yakinlastirir, gerisi runner.
+    """
+    max_bps = float(getattr(cfg, "V3_TP1_MAX_BPS", 60.0) or 0)
+    if max_bps <= 0 or entry <= 0 or tp1 <= 0:
+        return tp1
+    d = entry * max_bps / 1e4
+    if direction == "SELL":
+        return max(tp1, round(entry - d, 2))   # tp1<entry; mesafeyi kis
+    return min(tp1, round(entry + d, 2))        # BUY: tp1>entry
+
+
 def _calc_range_sell(entry: float, support: float, resistance: float) -> dict | None:
     if entry <= 0 or support <= 0 or resistance <= support or entry <= support:
         return None
     from engine.v3_common import range_channel_tp_ladder
 
-    fallback_sl = max(resistance * 1.001, entry * 1.0002)
-    sl = _structural_sl_short(entry, resistance, fallback_sl)
+    sl = _fade_sl_short(entry, resistance)
     levels = getattr(state, "v3_zone_layers", None) or {}
     tp1, tp2 = range_channel_tp_ladder(
         "SHORT",
@@ -193,6 +241,7 @@ def _calc_range_sell(entry: float, support: float, resistance: float) -> dict | 
     risk = max(sl - entry, 0.0001)
     reward = max(entry - tp2, 0.0001)
     rr = reward / risk
+    tp1 = _cap_tp1_reachable("SELL", entry, tp1)
     return {
         "direction": "SELL",
         "price": entry,
@@ -200,6 +249,8 @@ def _calc_range_sell(entry: float, support: float, resistance: float) -> dict | 
         "tp1": tp1,
         "tp2": tp2,
         "rr": rr,
+        "sl_source": "fade_level",
+        "sl_anchor": resistance,
     }
 
 
@@ -208,8 +259,7 @@ def _calc_range_buy(entry: float, support: float, resistance: float) -> dict | N
         return None
     from engine.v3_common import range_channel_tp_ladder
 
-    fallback_sl = min(support * 0.999, entry * 0.9998)
-    sl = _structural_sl_long(entry, support, fallback_sl)
+    sl = _fade_sl_long(entry, support)
     levels = getattr(state, "v3_zone_layers", None) or {}
     tp1, tp2 = range_channel_tp_ladder(
         "LONG",
@@ -226,6 +276,7 @@ def _calc_range_buy(entry: float, support: float, resistance: float) -> dict | N
     risk = max(entry - sl, 0.0001)
     reward = max(tp2 - entry, 0.0001)
     rr = reward / risk
+    tp1 = _cap_tp1_reachable("BUY", entry, tp1)
     return {
         "direction": "BUY",
         "price": entry,
@@ -233,6 +284,8 @@ def _calc_range_buy(entry: float, support: float, resistance: float) -> dict | N
         "tp1": tp1,
         "tp2": tp2,
         "rr": rr,
+        "sl_source": "fade_level",
+        "sl_anchor": support,
     }
 
 
@@ -263,6 +316,8 @@ def _build_range_entry(
         "tp1": calc["tp1"],
         "tp2": calc["tp2"],
         "rr": rr,
+        "sl_source": str(calc.get("sl_source") or "fade_level"),
+        "sl_anchor": float(calc.get("sl_anchor", 0) or 0),
         "preview": False,
     }
 
@@ -272,7 +327,7 @@ def _range_preview(levels: dict, price: float) -> dict:
     s, r = _band_prices(levels)
     if s <= 0 or r <= s or price <= 0:
         return _invalid()
-    zone = str(levels.get("zone") or zone_for_price(s, r, price))
+    zone = str(levels.get("zone") or calculate_channel_zone(price, s, r))
     if zone == "NEAR_RESISTANCE":
         calc = _calc_range_sell(price, s, r)
         if calc:
@@ -785,7 +840,7 @@ def build_entry_for_score_side(
             return sig
         return _range_preview(levels, entry)
 
-    zone = str(levels.get("zone") or zone_for_price(s, r, entry))
+    zone = str(levels.get("zone") or calculate_channel_zone(entry, s, r))
     if direction == "SELL":
         sig = _invalid()
         if s > 0 and entry >= s * 0.9995:

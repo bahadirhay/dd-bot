@@ -927,6 +927,28 @@ async def close_position(reason: str = "signal") -> float:
         except Exception:
             pass
 
+    # Chop devre kesici: arka arkaya zayif-cikis (score_weak/flow_reversal) zarar
+    # -> piyasa takip vermiyor; yeni girisi gecici durdur (ac-kapa cigini keser).
+    try:
+        n_thr = int(getattr(cfg, "V3_CHOP_BREAKER_N", 4) or 0)
+        if n_thr > 0:
+            weak = (reason in ("score_weak_exit", "flow_reversal_exit")
+                    and pnl <= 0 and not state.pos_tp1_hit)
+            if pnl > 0 or state.pos_tp1_hit:
+                state.chop_streak = 0
+            elif weak:
+                state.chop_streak = int(getattr(state, "chop_streak", 0) or 0) + 1
+            if int(getattr(state, "chop_streak", 0) or 0) >= n_thr:
+                cd = float(getattr(cfg, "V3_CHOP_BREAKER_COOLDOWN_SEC", 1800) or 1800)
+                state.chop_block_until = time.time() + cd
+                state.chop_streak = 0
+                log.warning(
+                    f"[CHOP-BREAKER] {n_thr} ardisik zayif-cikis zarar -> "
+                    f"yeni giris {cd/60:.0f}dk durduruldu (takipsiz chop)"
+                )
+    except Exception:
+        pass
+
     from execution.position_lifecycle import async_finalize_position_closed
 
     await async_finalize_position_closed(

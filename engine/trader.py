@@ -349,6 +349,15 @@ async def execute_entry(details: dict, source: str = "breakout") -> bool:
         _v3_execute_block(details, source, "reentry_cooldown", msg)
         return False
 
+    chop_until = float(getattr(state, "chop_block_until", 0) or 0)
+    if time.time() < chop_until:
+        kalan_chop = chop_until - time.time()
+        msg = f"chop devre kesici {kalan_chop:.0f}s (ardisik zayif-cikis zarar — takipsiz piyasa)"
+        log.info(f"Giriş atlandı — {msg} ({source})")
+        state.no_entry_reason = msg
+        _v3_execute_block(details, source, "chop_breaker", msg)
+        return False
+
     warmup = _startup_warmup_block()
     if warmup:
         log.info(f"Giriş atlandı — {warmup} ({source})")

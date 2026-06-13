@@ -4,7 +4,7 @@ botlog/performance_context.py
 Startup'ta bot.db'den son trade geçmişini okur ve
 cfg / state'e adaptif parametreler yazar.
 
-Kullanım (main.py → _main_loop içinde setup_api'den sonra):
+Kullanım (main.py -> _main_loop içinde setup_api'den sonra):
     from botlog.performance_context import load_performance_context
     await load_performance_context()
 """
@@ -96,7 +96,7 @@ async def load_performance_context(limit: int = 30) -> PerformanceContext:
     bot.db'den son `limit` kapalı trade'i okur, PerformanceContext üretir
     ve sonuçları state + cfg'ye yazar.
 
-    Tamamen non-blocking: DB hatası → varsayılan context döner, bot durmuyor.
+    Tamamen non-blocking: DB hatası -> varsayılan context döner, bot durmuyor.
     """
     ctx = PerformanceContext()
 
@@ -115,46 +115,43 @@ async def load_performance_context(limit: int = 30) -> PerformanceContext:
         cur.execute("PRAGMA table_info(trades)")
         cols = {row["name"] for row in cur.fetchall()}
 
-        if "pnl_pct" not in cols or "side" not in cols:
+        # Sema toleransi: gercek tabloda side->direction, ts->close_ts/open_ts,
+        # entry_mode/structure_* yok. Var olan sutunlara dinamik esle.
+        side_col = "side" if "side" in cols else ("direction" if "direction" in cols else None)
+        if "pnl_pct" not in cols or side_col is None:
             log.warning("PerfCtx: trades tablosu beklenen sütunları içermiyor — atlanıyor")
             conn.close()
             return ctx
 
-        # Sadece kapalı (exit_price dolu) trade'leri al
+        def _expr(real: str, alias: str, default: str) -> str:
+            return f"{real} AS {alias}" if real in cols else f"{default} AS {alias}"
+
+        ts_expr = (
+            "ts AS ts" if "ts" in cols
+            else "COALESCE(close_ts, open_ts, 0) AS ts"
+        )
+        select_cols = ", ".join([
+            "id",
+            ts_expr,
+            f"{side_col} AS side",
+            _expr("entry_mode", "entry_mode", "'unknown'"),
+            "COALESCE(entry_price,0) AS entry_price",
+            "COALESCE(exit_price,0) AS exit_price" if "exit_price" in cols else "0 AS exit_price",
+            "COALESCE(pnl_pct,0) AS pnl_pct",
+            "COALESCE(tp1_hit,0) AS tp1_hit",
+            "COALESCE(be_activated,0) AS be_activated",
+            _expr("structure_1h", "structure_1h", "'UNCLEAR'"),
+            _expr("structure_15m", "structure_15m", "'UNCLEAR'"),
+        ])
+
         exit_col = "exit_price" if "exit_price" in cols else None
-        if exit_col:
-            cur.execute(
-                f"""SELECT id, ts, side,
-                           COALESCE(entry_mode,'unknown') AS entry_mode,
-                           COALESCE(entry_price,0) AS entry_price,
-                           COALESCE(exit_price,0) AS exit_price,
-                           COALESCE(pnl_pct,0) AS pnl_pct,
-                           COALESCE(tp1_hit,0) AS tp1_hit,
-                           COALESCE(be_activated,0) AS be_activated,
-                           COALESCE(structure_1h,'UNCLEAR') AS structure_1h,
-                           COALESCE(structure_15m,'UNCLEAR') AS structure_15m
-                    FROM trades
-                    WHERE {exit_col} IS NOT NULL AND {exit_col} > 0
-                    ORDER BY ts DESC
-                    LIMIT ?""",
-                (limit,),
-            )
-        else:
-            cur.execute(
-                f"""SELECT id, ts, side,
-                           COALESCE(entry_mode,'unknown') AS entry_mode,
-                           COALESCE(entry_price,0) AS entry_price,
-                           0 AS exit_price,
-                           COALESCE(pnl_pct,0) AS pnl_pct,
-                           COALESCE(tp1_hit,0) AS tp1_hit,
-                           COALESCE(be_activated,0) AS be_activated,
-                           COALESCE(structure_1h,'UNCLEAR') AS structure_1h,
-                           COALESCE(structure_15m,'UNCLEAR') AS structure_15m
-                    FROM trades
-                    ORDER BY ts DESC
-                    LIMIT ?""",
-                (limit,),
-            )
+        where = f"WHERE {exit_col} IS NOT NULL AND {exit_col} > 0" if exit_col else ""
+        order_ts = "ts" if "ts" in cols else "COALESCE(close_ts, open_ts, 0)"
+        cur.execute(
+            f"SELECT {select_cols} FROM trades {where} "
+            f"ORDER BY {order_ts} DESC LIMIT ?",
+            (limit,),
+        )
 
         rows = cur.fetchall()
         conn.close()
@@ -201,12 +198,12 @@ async def load_performance_context(limit: int = 30) -> PerformanceContext:
         ctx.suggested_risk_multiplier = 0.5
         ctx.warnings.append(
             f"Genel win rate düşük ({ctx.win_rate:.0%}, n={ctx.total_trades}) "
-            f"→ risk çarpanı 0.5x"
+            f"-> risk çarpanı 0.5x"
         )
     elif ctx.win_rate < 0.45 and ctx.total_trades >= 8:
         ctx.suggested_risk_multiplier = 0.75
         ctx.warnings.append(
-            f"Win rate zayıf ({ctx.win_rate:.0%}) → risk çarpanı 0.75x"
+            f"Win rate zayıf ({ctx.win_rate:.0%}) -> risk çarpanı 0.75x"
         )
 
     # Range modu sürekli kaybediyorsa devre dışı bırak
@@ -216,7 +213,7 @@ async def load_performance_context(limit: int = 30) -> PerformanceContext:
             ctx.disable_range = True
             ctx.warnings.append(
                 f"Range WR={ctx.range_win_rate:.0%} (n={len(range_trades)}) "
-                f"< 35% → range modu devre dışı"
+                f"< 35% -> range modu devre dışı"
             )
 
     # Break modu sürekli kaybediyorsa
@@ -225,7 +222,7 @@ async def load_performance_context(limit: int = 30) -> PerformanceContext:
             ctx.disable_break = True
             ctx.warnings.append(
                 f"Break WR={ctx.break_win_rate:.0%} (n={len(break_trades)}) "
-                f"< 35% → break modu devre dışı"
+                f"< 35% -> break modu devre dışı"
             )
 
     # Günlük PnL zaten kötüyse ek uyarı
@@ -243,7 +240,7 @@ async def load_performance_context(limit: int = 30) -> PerformanceContext:
         f"avg_pnl={ctx.avg_pnl_pct:.2f}% risk_mult={ctx.suggested_risk_multiplier}"
     )
     for w in ctx.warnings:
-        log.warning(f"PerfCtx ⚠ {w}")
+        log.warning(f"PerfCtx [!] {w}")
 
     return ctx
 
@@ -256,23 +253,28 @@ def _apply_to_state_and_cfg(ctx: PerformanceContext) -> None:
     try:
         from core.config import cfg
 
-        # Risk çarpanı uygula
-        if ctx.suggested_risk_multiplier < 1.0:
-            original = cfg.RISK_PCT
-            cfg.RISK_PCT = round(cfg.RISK_PCT * ctx.suggested_risk_multiplier, 3)
+        # Risk çarpanı uygula — TABAN degere gore (idempotent). Tekrar cagrilinca
+        # bilesik kuculmesin diye orijinal RISK_PCT bir kez saklanir; her uygulama
+        # base*carpan olarak hesaplanir.
+        if not hasattr(cfg, "_risk_pct_base"):
+            cfg._risk_pct_base = cfg.RISK_PCT
+        base = float(cfg._risk_pct_base)
+        new_risk = round(base * ctx.suggested_risk_multiplier, 3)
+        if abs(new_risk - float(cfg.RISK_PCT)) > 1e-9:
             log.warning(
-                f"RISK_PCT: {original}% → {cfg.RISK_PCT}% "
-                f"(çarpan={ctx.suggested_risk_multiplier})"
+                f"RISK_PCT: {cfg.RISK_PCT}% -> {new_risk}% "
+                f"(taban={base}% carpan={ctx.suggested_risk_multiplier})"
             )
+        cfg.RISK_PCT = new_risk
 
         # Entry mode kilitleme
         current_mode = str(getattr(cfg, "ENTRY_MODE", "break")).lower()
         if ctx.disable_range and current_mode in ("range", "hybrid"):
             cfg.ENTRY_MODE = "break"
-            log.warning("ENTRY_MODE: range/hybrid → break (range WR < 35%)")
+            log.warning("ENTRY_MODE: range/hybrid -> break (range WR < 35%)")
         elif ctx.disable_break and current_mode == "break":
             cfg.ENTRY_MODE = "range"
-            log.warning("ENTRY_MODE: break → range (break WR < 35%)")
+            log.warning("ENTRY_MODE: break -> range (break WR < 35%)")
 
     except Exception as e:
         log.warning(f"PerfCtx cfg uygulama hatası: {e}")

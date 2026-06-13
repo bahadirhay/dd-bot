@@ -591,6 +591,16 @@ async def _execute_market_entry(plan: Plan, signal_id: int) -> bool:
     )
     update_trade_entry(_trade_id, fill, qty_db)
     try:
+        from botlog.db import update_trade_open_features
+        from botlog.trade_features import collect_open_features
+
+        update_trade_open_features(
+            _trade_id,
+            collect_open_features(plan.direction, fill, state.pos_tp1, plan.sl),
+        )
+    except Exception:
+        pass
+    try:
         from botlog.db import update_trade_entry_tp1_original
 
         update_trade_entry_tp1_original(
@@ -816,7 +826,15 @@ async def close_position(reason: str = "signal") -> float:
         return await _paper.paper_close(reason)
 
     global _trade_id
-    if time.time() < getattr(state, "startup_grace_until", 0):
+    # Korumali cikislar (felaket tavani / akis-reversal / skor-zayif / SL) startup
+    # grace icinde de calismali — restore edilen zararli pozisyon grace yuzunden
+    # daha buyuk zarar yazmasin. Yalniz strateji-kaynakli normal cikislar beklesin.
+    _protective = {
+        "hard_cap", "flow_reversal_exit", "score_weak_exit",
+        "runner_target_reversal", "thesis_failed_level", "thesis_failed_cvd",
+        "thesis_failed_stale", "sl", "stop_loss", "exchange_closed_poll",
+    }
+    if reason not in _protective and time.time() < getattr(state, "startup_grace_until", 0):
         log.warning(f"Startup grace — pozisyon kapatma engellendi: {reason}")
         return 0.0
     if not state.in_position:
@@ -898,6 +916,16 @@ async def close_position(reason: str = "signal") -> float:
                 "be_activated": int(state.pos_be_active),
             },
         )
+        try:
+            from botlog.db import update_trade_open_features
+            from botlog.trade_features import collect_close_features
+
+            update_trade_open_features(
+                _trade_id,
+                collect_close_features(state.pos_side, state.pos_entry, state.pos_open_ts),
+            )
+        except Exception:
+            pass
 
     from execution.position_lifecycle import async_finalize_position_closed
 
@@ -913,6 +941,16 @@ async def close_position(reason: str = "signal") -> float:
         await notify_close(reason, pnl)
     except Exception:
         pass
+
+    # Ogrenme dongusu: kapanan trade DB'ye yazildi -> performans baglamini yeniden
+    # hesapla (win-rate/risk carpanini guncelle). Idempotent (taban-risk bazli).
+    if bool(getattr(cfg, "V3_PERF_CTX_ON_CLOSE", True)):
+        try:
+            from botlog.performance_context import load_performance_context
+
+            await load_performance_context()
+        except Exception as e:
+            log.warning(f"PerfCtx kapanis-sonrasi guncelleme atlandi: {e}")
 
     return pnl
 

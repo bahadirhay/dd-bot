@@ -1233,8 +1233,10 @@ def _finalize_active_pair(support: dict, resistance: dict, price: float) -> dict
         result["range_valid"] = result["range_width"] > 0
     if result["range_width"] > 0:
         result["range_position"] = (price - s) / result["range_width"]
+    from engine.v3_common import calculate_channel_zone
+
     result["edge_zone"] = zone_for_price(s, r, price, bars15=recent_20)
-    result["zone"] = price_zone_for_band(s, r, price)
+    result["zone"] = calculate_channel_zone(price, s, r)
     return result
 
 
@@ -1711,6 +1713,57 @@ def _htf_macro_band_width(levels: list[dict], price: float, bars15: list[dict]) 
     return max(r - s, 0.0)
 
 
+def _pine_span_band(levels: list[dict], price: float) -> dict | None:
+    """
+    Fiyat tum Pine pivotlarinin disindayken (bos alan) band'i SADECE Pine
+    seviyelerinden kurar — uydurma seviye yok.
+      - Fiyat hepsinin USTUNDE: R = en yuksek pivot (kirilan direnc), S = onun
+        altindaki en yakin pivot. Fiyat R'nin ustunde -> breakout-up bolgesi.
+      - Fiyat hepsinin ALTINDA: S = en dusuk pivot (kirilan destek), R = onun
+        ustundeki en yakin pivot. Fiyat S'nin altinda -> breakdown bolgesi.
+    Karar motoru bu band'da breakout/breakdown'u CVD+skor ile teyit eder.
+    """
+    prices = sorted(
+        {
+            round(float(l.get("price", 0) or 0), 2)
+            for l in levels
+            if float(l.get("price", 0) or 0) > 0
+        }
+    )
+    if price <= 0 or len(prices) < 2:
+        return None
+    # Karsi kenar secerken min ayrim: yakin-es kume (or. 1665.76/1665.71) tek
+    # seviye sayilsin, dejenere 0.05pt band olmasin.
+    sep = max(price * 0.003, 2.0)
+    if price > prices[-1]:
+        r = prices[-1]
+        below = [p for p in prices if p < r - sep]
+        s = max(below) if below else (prices[0] if prices[0] < r else r * 0.99)
+        flag = "above_all_pivots"
+    elif price < prices[0]:
+        s = prices[0]
+        above = [p for p in prices if p > s + sep]
+        r = min(above) if above else (prices[-1] if prices[-1] > s else s * 1.01)
+        flag = "below_all_pivots"
+    else:
+        return None
+    if not (r > s > 0):
+        return None
+    out = _finalize_active_pair(
+        _ladder_level_dict(s, "support"),
+        _ladder_level_dict(r, "resistance"),
+        price,
+    )
+    out["outside_channel"] = True
+    out["pine_span"] = True
+    out[flag] = True
+    log.info(
+        f"[LEVELS] Pine-span bant ({flag}) px={price:.2f} S={s:.2f} R={r:.2f} "
+        f"— fiyat kanal disinda, breakout/breakdown teyide birakildi"
+    )
+    return out
+
+
 def _resolve_active_levels(levels: list[dict], price: float, bars15: list[dict]) -> dict:
     macro = _resolve_htf_macro_band(levels, price, bars15)
     if macro.get("support") and macro.get("resistance"):
@@ -1737,6 +1790,13 @@ def _resolve_active_levels(levels: list[dict], price: float, bars15: list[dict])
         if float(l.get("price", 0) or 0) > price and str(l.get("kind")) == "resistance"
     ]
     if not supports or not resistances:
+        # Fiyat tum Pine pivotlarinin DISINDA (bos alan). Uydurma seviye koymadan,
+        # Pine span'inden tek-yonlu band kur: ust kirilirsa breakout-up, alt
+        # kirilirsa breakdown. Giris yine CVD+skor+momentum kapilariyla onaylanir
+        # (sahte long/short engellenir). Boylece "destek/direnc yok" kilidi acilir.
+        span = _pine_span_band(valid, price)
+        if span is not None:
+            return span
         return _empty_active()
 
     min_width = _band_min_width(price, bars15)
@@ -2013,6 +2073,51 @@ def _validate_band_against_ladder(active: dict, price: float) -> dict:
     log.info(
         f"[LEVELS] S/R touch-validated snap: S {s:.2f}->{ns:.2f} R {r:.2f}->{nr:.2f} "
         f"(>={min_touch} dokunus, tarihsel merdiven)"
+    )
+    return out
+
+
+def _snap_band_to_merged_pivots(active: dict, merged: list[dict], price: float) -> dict:
+    """
+    Aktif band kenarlarini GRAFIKTE gosterilen gercek merged pivotlara sabitle:
+    fiyatin altindaki en yakin merged destek + ustundeki en yakin merged direnc.
+    Boylece bot ile grafik AYNI S/R'i kullanir; phantom ladder seviyesi (or. 1640.24
+    grafikte yokken trade hedefi olmasi) biter. Merged bir kenar veremezse ya da
+    band dejenere darsa, eski ladder validasyonuna geri duser.
+    """
+    if price <= 0 or not merged:
+        return _validate_band_against_ladder(active, price)
+    sup_below = [
+        float(l.get("price", 0) or 0)
+        for l in merged
+        if str(l.get("kind")) == "support" and 0 < float(l.get("price", 0) or 0) < price
+    ]
+    res_above = [
+        float(l.get("price", 0) or 0)
+        for l in merged
+        if str(l.get("kind")) == "resistance" and float(l.get("price", 0) or 0) > price
+    ]
+    if not sup_below or not res_above:
+        return _validate_band_against_ladder(active, price)
+    ns = max(sup_below)  # fiyatin altindaki en yakin gercek destek
+    nr = min(res_above)  # fiyatin ustundeki en yakin gercek direnc
+    min_w = price * float(getattr(cfg, "V3_BAND_MIN_WIDTH_PCT", 0.008) or 0.008)
+    if (nr - ns) < min_w * 0.5:
+        return _validate_band_against_ladder(active, price)
+    s0 = float((active.get("support") or {}).get("price", 0) or 0)
+    r0 = float((active.get("resistance") or {}).get("price", 0) or 0)
+    if abs(s0 - ns) < 0.01 and abs(r0 - nr) < 0.01:
+        return active  # band zaten gercek merged pivotlarda
+    s_lv = _lookup_merged_level(merged, "support", ns) or _ladder_level_dict(ns, "support")
+    r_lv = _lookup_merged_level(merged, "resistance", nr) or _ladder_level_dict(nr, "resistance")
+    out = _finalize_active_pair(s_lv, r_lv, price)
+    for k in ("macro_support", "macro_resistance", "macro_range_valid", "trade_band"):
+        if k in active:
+            out[k] = active[k]
+    out["pivot_authority"] = True
+    log.info(
+        f"[LEVELS] pivot-authority snap: S {s0:.2f}->{ns:.2f} R {r0:.2f}->{nr:.2f} "
+        f"(grafik merged pivot, ladder ezilmedi)"
     )
     return out
 
@@ -2625,13 +2730,30 @@ def _maybe_log_level_change(
         return
     _last_level_change_key = key
 
+    s_reason = (
+        _infer_level_change_reason(
+            "support", old_s, new_s, prev_active, new_active, merged,
+            band_unlocked=band_unlocked, cold_start=cold_start,
+        )
+        if s_changed
+        else ""
+    )
+    r_reason = (
+        _infer_level_change_reason(
+            "resistance", old_r, new_r, prev_active, new_active, merged,
+            band_unlocked=band_unlocked, cold_start=cold_start,
+        )
+        if r_changed
+        else ""
+    )
+
     parts = ["[LEVEL_CHANGE]"]
     if s_changed:
         parts.extend(
             [
                 f"old_support={old_s:.2f}" if old_s > 0 else "old_support=—",
                 f"new_support={new_s:.2f}",
-                f"reason={_infer_level_change_reason('support', old_s, new_s, prev_active, new_active, merged, band_unlocked=band_unlocked, cold_start=cold_start)}",
+                f"reason={s_reason}",
                 f"strength_old={_level_strength_tag(prev_active.get('support'), merged, kind='support')}",
                 f"strength_new={_level_strength_tag(new_active.get('support'), merged, kind='support')}",
             ]
@@ -2643,13 +2765,47 @@ def _maybe_log_level_change(
             [
                 f"old_resistance={old_r:.2f}" if old_r > 0 else "old_resistance=—",
                 f"new_resistance={new_r:.2f}",
-                f"reason={_infer_level_change_reason('resistance', old_r, new_r, prev_active, new_active, merged, band_unlocked=band_unlocked, cold_start=cold_start)}",
+                f"reason={r_reason}",
                 f"strength_old={_level_strength_tag(prev_active.get('resistance'), merged, kind='resistance')}",
                 f"strength_new={_level_strength_tag(new_active.get('resistance'), merged, kind='resistance')}",
             ]
         )
     parts.append(f"px={price:.2f}")
     log.info("\n".join(parts))
+
+    # --- DB audit: gereksiz S/R oynamasini olcmek icin (yalniz gercek degisim) ---
+    if getattr(cfg, "V3_SR_CHANGE_DB", True):
+        try:
+            from botlog import db as _db
+
+            px = float(price or 0)
+            dist_s = abs(px - new_s) if new_s > 0 else 0.0
+            dist_r = abs(new_r - px) if new_r > 0 else 0.0
+            touch_tol = max(px * 0.0008, 1.5) if px > 0 else 1.5
+            chg_dist = min(
+                dist_s if s_changed and new_s > 0 else 1e9,
+                dist_r if r_changed and new_r > 0 else 1e9,
+            )
+            _db.log_sr_change(
+                {
+                    "price": round(px, 2),
+                    "old_support": round(old_s, 2) if old_s > 0 else None,
+                    "new_support": round(new_s, 2) if new_s > 0 else None,
+                    "old_resistance": round(old_r, 2) if old_r > 0 else None,
+                    "new_resistance": round(new_r, 2) if new_r > 0 else None,
+                    "d_support": round(abs(new_s - old_s), 2) if (s_changed and old_s > 0 and new_s > 0) else None,
+                    "d_resistance": round(abs(new_r - old_r), 2) if (r_changed and old_r > 0 and new_r > 0) else None,
+                    "support_reason": s_reason or None,
+                    "resistance_reason": r_reason or None,
+                    "dist_support_pt": round(dist_s, 2) if new_s > 0 else None,
+                    "dist_resistance_pt": round(dist_r, 2) if new_r > 0 else None,
+                    "band_old_pt": round(old_r - old_s, 2) if (old_s > 0 and old_r > old_s) else None,
+                    "band_new_pt": round(new_r - new_s, 2) if (new_s > 0 and new_r > new_s) else None,
+                    "touched": 1 if chg_dist <= touch_tol else 0,
+                }
+            )
+        except Exception:
+            pass
 
 
 def _active_level_label(price: float, level: float, nominal: str) -> str:
@@ -3093,13 +3249,23 @@ def update_levels() -> dict:
     snap = _apply_trade_band_overlay(snap, price, bars15)
     active = snap.get("active") or active
     active = _deepen_support_from_meaningful_band(active, price)
-    active = _enforce_min_band_width(active, price)
+    # Pivot-otoritesi acikken min-band-genisletme (ladder) gereksiz: hemen ardindan
+    # gelen snap zaten merged pivota cekiyor. Bu ara katlama "dar bant genisletildi
+    # -> snap" cift-oynamasini (S/R titresimi) uretiyordu; pivot-otoritesi varsa atla.
+    _pivot_auth = bool(getattr(cfg, "V3_BAND_PIVOT_AUTHORITY", True)) and not bool(
+        active.get("entry_band_frozen")
+    )
+    if not _pivot_auth:
+        active = _enforce_min_band_width(active, price)
     # --- TEK KAYNAK OTORİTESİ ---
     # Overlay ve diğer reaktif katmanlar bittikten SONRA, touch-validated tarihsel
     # merdiven SON SÖZ. Böylece hiçbir modül validated band'ı ezemez (R=1661 vs
     # 1647.94 çakışması biter); ardından histerezis ile titreşim söner.
     if not bool(active.get("entry_band_frozen")):
-        active = _validate_band_against_ladder(active, price)
+        if bool(getattr(cfg, "V3_BAND_PIVOT_AUTHORITY", True)):
+            active = _snap_band_to_merged_pivots(active, merged, price)
+        else:
+            active = _validate_band_against_ladder(active, price)
         active = _debounce_active_band(active, price)
     snap["active"] = active
     state.v3_levels = snap
@@ -3392,32 +3558,10 @@ def _upgrade_prev_active_trade_r(
 
 
 def price_zone_for_band(support: float, resistance: float, price: float) -> str:
-    """
-    Fiyat konumu etiketi. Trade uygunlugu degildir.
+    """Geriye uyumluluk — calculate_channel_zone ile ayni."""
+    from engine.v3_common import calculate_channel_zone
 
-    Once dirence/destege mesafe (%1.2 veya $8), sonra band yuzdesi (varsayilan %20).
-    """
-    s = float(support or 0)
-    r = float(resistance or 0)
-    p = float(price or 0)
-    if s <= 0 or r <= s or p <= 0:
-        return "MID_RANGE"
-    if p <= s:
-        return "NEAR_SUPPORT"
-    if p >= r:
-        return "NEAR_RESISTANCE"
-    near = _zone_edge_distance_px(p)
-    if (r - p) <= near:
-        return "NEAR_RESISTANCE"
-    if (p - s) <= near:
-        return "NEAR_SUPPORT"
-    edge_frac = float(getattr(cfg, "V3_ZONE_EDGE_FRAC", 0.20) or 0.20)
-    pos = (p - s) / (r - s)
-    if pos <= edge_frac:
-        return "NEAR_SUPPORT"
-    if pos >= (1.0 - edge_frac):
-        return "NEAR_RESISTANCE"
-    return "MID_RANGE"
+    return calculate_channel_zone(price, support, resistance)
 
 
 def zone_for_price(
@@ -3916,7 +4060,9 @@ def get_levels_snapshot(price: float = 0.0) -> dict:
     macro_r_px = float(macro_resistance.get("price", 0) or active.get("macro_resistance", 0) or 0)
     rw = max(r_px - s_px, 0.0)
     rpos = ((px - s_px) / rw) if rw > 0 and px > 0 else float(active.get("range_position", 0.5) or 0.5)
-    zone = str(active.get("zone") or "") or price_zone_for_band(s_px, r_px, px)
+    from engine.v3_common import calculate_channel_zone
+
+    zone = str(active.get("zone") or "") or calculate_channel_zone(px, s_px, r_px)
     edge_zone = str(active.get("edge_zone") or "") or zone_for_price(
         s_px, r_px, px, bars15=bars_15m(20)
     )

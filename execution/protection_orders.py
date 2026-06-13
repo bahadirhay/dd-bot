@@ -698,6 +698,109 @@ async def maybe_restore_entry_tp1(
     )
 
 
+async def maybe_repair_v3_tp1_too_close(
+    *, force: bool = False, reason: str = "V3 TP1 min mesafe"
+) -> None:
+    """V3 range: girise yapisik TP1'i kanal ladder + min bps ile uzaklastir."""
+    from core.config import is_paper_mode
+    from engine.structure_levels import v3_zone_tp_targets
+    from engine.trade_thesis_v3 import range_tp1_min_bps, tp1_distance_bps, tp1_too_close_to_entry
+
+    if is_paper_mode() or not cfg.API_KEY:
+        return
+    if not state.in_position or state.pos_tp1_hit:
+        return
+    pb = dict(state.position_breakout or {})
+    if str(pb.get("entry_mode") or pb.get("strategy") or "") != "v3":
+        return
+
+    side = (state.pos_side or "").upper()
+    entry = float(state.pos_entry or 0)
+    old_tp1 = float(state.pos_tp1 or 0)
+    if entry <= 0 or old_tp1 <= 0:
+        return
+    if not force and not tp1_too_close_to_entry(side, entry, old_tp1):
+        return
+
+    new_tp1, new_tp2 = v3_zone_tp_targets(side, entry)
+    if new_tp1 <= 0:
+        return
+    if side == "SHORT":
+        if new_tp1 >= entry or new_tp1 >= old_tp1:
+            ref_s = float(pb.get("active_support") or 0)
+            min_frac = max(
+                float(getattr(cfg, "V3_RANGE_TP1_MIN_BAND_FRAC", 0.25) or 0.25),
+                0.1,
+            )
+            if ref_s > 0 and ref_s < entry:
+                new_tp1 = entry - (entry - ref_s) * min_frac
+            else:
+                new_tp1 = entry - entry * range_tp1_min_bps() / 10000.0
+    elif side == "LONG":
+        if new_tp1 <= entry or new_tp1 <= old_tp1:
+            ref_r = float(pb.get("active_resistance") or 0)
+            min_frac = max(
+                float(getattr(cfg, "V3_RANGE_TP1_MIN_BAND_FRAC", 0.25) or 0.25),
+                0.1,
+            )
+            if ref_r > entry:
+                new_tp1 = entry + (ref_r - entry) * min_frac
+            else:
+                new_tp1 = entry + entry * range_tp1_min_bps() / 10000.0
+    else:
+        return
+
+    new_tp1 = round(new_tp1, 2)
+    if tp1_too_close_to_entry(side, entry, new_tp1):
+        log.warning(
+            f"{reason}: yeni TP1 hala yakin ({new_tp1:.2f}, "
+            f"{tp1_distance_bps(entry, new_tp1):.0f}bps)"
+        )
+        return
+
+    close_side = "SELL" if side == "LONG" else "BUY"
+    mark = await _current_mark()
+    tp1_adj, tp2_adj = await resolve_tp_levels(side, entry, new_tp1, new_tp2, mark)
+    if side == "SHORT" and (tp1_adj <= 0 or tp1_adj >= entry or tp1_adj >= old_tp1):
+        return
+    if side == "LONG" and (tp1_adj <= 0 or tp1_adj <= entry or tp1_adj <= old_tp1):
+        return
+    if tp1_too_close_to_entry(side, entry, tp1_adj):
+        return
+
+    await cancel_all_tp_algos(close_side)
+    await asyncio.sleep(0.25)
+    tp1_id = ""
+    if state.pos_qty_tp1 >= 0.001 and tp1_adj > 0:
+        tp1_id = await place_tp_algo(side, close_side, tp1_adj, state.pos_qty_tp1)
+    if not tp1_id:
+        log.warning(f"{reason}: borsa TP1 emri gonderilemedi")
+        return
+
+    state.pos_tp1 = tp1_adj
+    state.pos_tp2 = tp2_adj
+    state.pos_tp1_id = tp1_id
+    state.pos_tp2_id = ""
+    if pb:
+        pb["tp1"] = float(tp1_adj)
+        pb["tp2"] = float(tp2_adj)
+        state.position_breakout = pb
+    try:
+        import execution.executor as ex
+        from botlog.db import update_open_trade_tps, update_trade_entry_tp1_original
+
+        trade_id = int(getattr(ex, "_trade_id", 0) or 0)
+        update_open_trade_tps(trade_id, tp1=tp1_adj, tp2=tp2_adj)
+        update_trade_entry_tp1_original(trade_id, tp1_adj)
+    except Exception:
+        pass
+    log.info(
+        f"{reason}: TP1 {old_tp1:.2f} → {tp1_adj:.2f} "
+        f"(Δ{tp1_distance_bps(entry, tp1_adj):.0f}bps, eski "
+        f"{tp1_distance_bps(entry, old_tp1):.0f}bps)"
+    )
+
+
 async def maybe_refresh_v3_channel_tp1(
     *, force: bool = False, reason: str = "V3 kanal TP1 guncelleme"
 ) -> None:
@@ -800,10 +903,22 @@ async def maybe_adjust_open_tp(*, force: bool = False, reason: str = "TP yakınl
     pb = dict(state.position_breakout or {})
     if str(pb.get("entry_mode") or pb.get("strategy") or "") == "v3":
         if force:
-            log.info(
-                f"TP1 korundu: {float(state.pos_tp1 or 0):.2f} "
-                f"(V3 katman hedefi — breakout yaklastirma atlandi)"
-            )
+            from engine.trade_thesis_v3 import tp1_distance_bps, tp1_too_close_to_entry
+
+            cur = float(state.pos_tp1 or 0)
+            entry = float(state.pos_entry or 0)
+            if tp1_too_close_to_entry(state.pos_side, entry, cur):
+                log.warning(
+                    f"TP1 girise yapisik: {cur:.2f} "
+                    f"({tp1_distance_bps(entry, cur):.0f}bps) — "
+                    f"maybe_repair_v3_tp1_too_close bekleniyor"
+                )
+            else:
+                log.info(
+                    f"TP1 korundu: {cur:.2f} "
+                    f"({tp1_distance_bps(entry, cur):.0f}bps, "
+                    f"V3 — breakout yaklastirma atlandi)"
+                )
         return
     last = float(state.pos_tp_manage_ts or 0)
     cd = float(getattr(cfg, "TP_ADJUST_COOLDOWN_SEC", 120))
@@ -1031,6 +1146,110 @@ async def apply_5m_runner_sl_confirm(candle_1m: dict) -> bool:
             f"mevcut={current_sl:.2f}"
         )
     return ok
+
+
+async def apply_mfe_runner_trail() -> bool:
+    """
+    TP1 sonrasi MFE (max favorable excursion) bazli trail: pozisyon acildigindan
+    beri ulasilan EN IYI fiyatin bir kesrini kilitler. 15m kapanis trail'i fiyatin
+    anlik uc noktasini kaciriyordu (#158: 1667'ye indi, geri 1676'da kapandi, kar
+    geri verildi). Bu her 1m'de calisir, kapanis beklemez; yalniz sikilastirir.
+    """
+    from core.config import cfg
+    from engine.position_sl import _sl_tighter, sl_manage_cooldown_ok
+    from engine.v3_common import bars_1m
+
+    if not bool(getattr(cfg, "V3_MFE_TRAIL_ENABLED", True)):
+        return False
+    if not state.in_position or not state.pos_tp1_hit:
+        return False
+    if not sl_manage_cooldown_ok():
+        return False
+
+    side = (state.pos_side or "").upper()
+    entry = float(state.pos_entry or 0)
+    cur = float(state.pos_sl or 0)
+    if entry <= 0 or cur <= 0:
+        return False
+
+    o = float(state.pos_open_ts or 0)
+    bars = bars_1m(600)
+    rel = [b for b in bars if float(b.get("ts", 0) or 0) >= o] or bars[-30:]
+    if not rel:
+        return False
+
+    frac = float(getattr(cfg, "V3_MFE_LOCK_FRAC", 0.5) or 0.5)
+    be = entry * 0.0003
+
+    if side == "SHORT":
+        mfe = min(float(b.get("low", 0) or 1e9) for b in rel)
+        if mfe <= 0 or mfe >= entry:
+            return False
+        cand = round(entry - frac * (entry - mfe), 2)
+        cand = min(cand, round(entry - be, 2))  # en kotu breakeven (giris ustune cikma)
+    else:
+        mfe = max(float(b.get("high", 0) or 0) for b in rel)
+        if mfe <= entry:
+            return False
+        cand = round(entry + frac * (mfe - entry), 2)
+        cand = max(cand, round(entry + be, 2))
+
+    if cand <= 0 or not _sl_tighter(side, cand, cur):
+        return False
+
+    return await _apply_runner_sl_tighten(cand, cur, side, "MFE trail")
+
+
+async def apply_structural_runner_trail() -> bool:
+    """
+    TP1 sonrasi YAPISAL trail: SL'yi en yakin karsi-swing'in arkasina koyar ve her
+    1m gunceller. SHORT: mark ustundeki en yakin lower-high'in ustu; LONG: mark
+    altindaki en yakin higher-low'un alti. Fiyat dusen tepeler/dipler yapmaya devam
+    ettikce ICERIDE kalir; yalniz yapi TERS kirilinca (lower-high yukari asilinca)
+    cikar. Boylece gurultu sicramasinda erken atilmaz, devam eden hareket yakalanir
+    (#158: 1667'ye indi, 1676'ya zipladi, sonra tekrar dustu — yapisal trail iceride
+    tutardi).
+    """
+    from core.config import cfg
+    from engine.position_sl import (
+        _runner_structural_candidates,
+        _sl_tighter,
+        sl_manage_cooldown_ok,
+    )
+
+    if not bool(getattr(cfg, "V3_STRUCT_TRAIL_ENABLED", True)):
+        return False
+    if not state.in_position or not state.pos_tp1_hit:
+        return False
+    if not sl_manage_cooldown_ok():
+        return False
+
+    side = (state.pos_side or "").upper()
+    cur = float(state.pos_sl or 0)
+    mark = float(state.mark_price or state.price or state.pos_entry or 0)
+    if cur <= 0 or mark <= 0:
+        return False
+
+    cands = _runner_structural_candidates(side, mark=mark, current_sl=cur)
+    if not cands:
+        return False
+
+    buf = float(getattr(cfg, "RUNNER_SL_BUFFER_BPS", 18)) / 10000.0
+    if side == "SHORT":
+        sl = round(cands[0] * (1.0 + buf), 2)  # en yakin lower-high'in ustu
+        entry = float(state.pos_entry or 0)
+        if entry > 0 and mark < entry:
+            sl = min(sl, round(entry * (1.0 - 0.0003), 2))  # en kotu breakeven
+    else:
+        sl = round(cands[0] * (1.0 - buf), 2)  # en yakin higher-low'un alti
+        entry = float(state.pos_entry or 0)
+        if entry > 0 and mark > entry:
+            sl = max(sl, round(entry * (1.0 + 0.0003), 2))
+
+    if sl <= 0 or not _sl_tighter(side, sl, cur):
+        return False
+
+    return await _apply_runner_sl_tighten(sl, cur, side, "yapisal trail (swing arkasi)")
 
 
 async def apply_15m_trailing_sl(close_15m: float) -> bool:

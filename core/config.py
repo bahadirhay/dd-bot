@@ -248,6 +248,19 @@ class Config:
         "true",
         "yes",
     )
+    # S/R aktif kenar degisimlerini DB'ye (sr_changes) yaz — gereksiz oynama analizi.
+    V3_SR_CHANGE_DB = os.getenv("V3_SR_CHANGE_DB", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    # Kanal-disi (BROKEN_SUPPORT/RESISTANCE devam) girislerde order-flow kapisi:
+    # CVD ters yondeyse acma. Veri: karsi-akis kanal-disi = en buyuk sizinti.
+    V3_BREAKOUT_CVD_GATE = os.getenv("V3_BREAKOUT_CVD_GATE", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
     # Zone: destek/dirence yakinlik = bant_genisligi * oran (or. 28$ * 0.35 = 9.8$)
     V3_ZONE_RATIO = float(os.getenv("V3_ZONE_RATIO", "0.35"))
     # Kanal teyidi: swing'in aktif S/R fiyatina yakinligi (0.003 = ±%0.3)
@@ -575,6 +588,10 @@ class Config:
     # Anlamlı band: dejenere dar band yerine min genişlik + çok-dokunuşlu seviye
     V3_BAND_MIN_WIDTH_PCT = float(os.getenv("V3_BAND_MIN_WIDTH_PCT", "0.008"))  # min %0.8 genişlik
     V3_BAND_MIN_TOUCHES = int(os.getenv("V3_BAND_MIN_TOUCHES", "2"))           # destek/direnç ≥2 dokunuş
+    # Pivot-otoritesi: aktif band kenarlari GRAFIKTE gosterilen merged pivotlar olsun
+    # (fiyatin altindaki en yakin gercek destek + ustundeki en yakin gercek direnc).
+    # Ladder yalnizca merged bir kenar uretemezse fallback. Bot ve grafik ayni S/R.
+    V3_BAND_PIVOT_AUTHORITY = os.getenv("V3_BAND_PIVOT_AUTHORITY", "true").lower() in ("1", "true", "yes")
     # Band histerezisi: fiyat pivot üstünde oynarken band her tick flip etmesin
     V3_BAND_HYSTERESIS_ENABLED = os.getenv("V3_BAND_HYSTERESIS_ENABLED", "true").lower() in ("1", "true", "yes")
     V3_BAND_HYSTERESIS_BPS = float(os.getenv("V3_BAND_HYSTERESIS_BPS", "25"))   # kenar tamponu (~4pt @1640)
@@ -624,6 +641,10 @@ class Config:
     # Kanal teyidi (channel_traversed+range_valid) sarti var; gercek kirilimda
     # zaten BREAKOUT_* devreye girer.
     V3_RANGE_SYMMETRIC_EDGE = os.getenv("V3_RANGE_SYMMETRIC_EDGE", "true").lower() == "true"
+    # Sweep guard: destek/direnc altina/ustune bu yuzdeden sig sarkma + son 15m
+    # cizgi altinda/ustunde kapanmadiysa = likidite supurmesi (gercek kirilim
+    # degil). BROKEN_SUPPORT devam-shortu zayiflatilir; reclaim sonrasi LONG acilir.
+    V3_SWEEP_MAX_DEPTH_PCT = float(os.getenv("V3_SWEEP_MAX_DEPTH_PCT", "0.0015"))
     # Tam-runner: sabit TP yok (TP1/TP2 emri atlanir). Tum pozisyon iz-suren SL
     # ile kapanir. KAPALI: backtest (n=41) full-runner'in MFE'yi geri verdigini
     # gosterdi; TP1 partial (%50 kenar-hedefte) kar-kilidi daha iyi. Acmak icin
@@ -648,10 +669,99 @@ class Config:
     # (edge RR+hizada; prob skoru kazançla korele değil). Ters-trend'de kapı kalır.
     V3_TREND_ALIGNED_OVERRIDE = os.getenv("V3_TREND_ALIGNED_OVERRIDE", "true").lower() in ("1", "true", "yes")
     V3_ALIGNED_MIN_RR = float(os.getenv("V3_ALIGNED_MIN_RR", "2.0"))
-    # Açılış ısınması (veri tazeliği): canlı akış + ilk 5m kapanış beklenir
+    # Trend-hizali baypas yalniz GERCEK trend modunda gecerli. RANGE_BAND'de
+    # (yatay olu bant) prob kapisi geri devreye girer -> olu bantta yazi-tura
+    # giris (churn) engellenir.
+    V3_ALIGNED_REQUIRE_TREND = os.getenv("V3_ALIGNED_REQUIRE_TREND", "true").lower() in ("1", "true", "yes")
+    # TP1 sinirlama: structural target dogrudan TP1 olarak kullanilmasin.
+    # TP1 her zaman [MIN_RR*risk, MAX_RR*risk] araliginda kalir -> ne girise
+    # yapisik mikro-TP (RR<1) ne de uzak/bayat swing (or. 1987) olur.
+    V3_TP1_MIN_RR = float(os.getenv("V3_TP1_MIN_RR", "1.0"))
+    V3_TP1_MAX_RR = float(os.getenv("V3_TP1_MAX_RR", "3.0"))
+    # RANGE TP1: girise yapisik yapisal seviye yerine min mesafe (bps + kanal payi)
+    V3_RANGE_TP1_MIN_BPS = float(os.getenv("V3_RANGE_TP1_MIN_BPS", "60"))
+    V3_RANGE_TP1_MIN_BAND_FRAC = float(os.getenv("V3_RANGE_TP1_MIN_BAND_FRAC", "0.25"))
+    # Tek karar otoritesi: aktif S/R kanal + breakout oncelik + mid WAIT
+    V3_CHANNEL_AUTHORITY = os.getenv("V3_CHANNEL_AUTHORITY", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    # Zone kenar bolgesi (band genisliginin orani). Backtest walk-forward: zone~35bps
+    # (frac ~0.22) iki yarida da daha iyi. 0.18 -> 0.22. RR-notr (sadece fade tetik
+    # yakinligini genisletir, SL/TP1/RR'ye dokunmaz).
+    V3_CHANNEL_EDGE_FRAC = float(os.getenv("V3_CHANNEL_EDGE_FRAC", "0.22"))
+    V3_BREAKOUT_TF_MIN = int(os.getenv("V3_BREAKOUT_TF_MIN", "5"))
+    V3_BREAKOUT_MIN_DIST_FRAC = float(os.getenv("V3_BREAKOUT_MIN_DIST_FRAC", "0.08"))
+    V3_CVD_EXTREME_VETO_RATIO = float(os.getenv("V3_CVD_EXTREME_VETO_RATIO", "0.35"))
+    V3_ENTRY_SCORE_MIN = float(os.getenv("V3_ENTRY_SCORE_MIN", "52"))
+    V3_STRUCTURE_SCORE_MIN = float(os.getenv("V3_STRUCTURE_SCORE_MIN", "52"))
+    # Felaket tavani: SL reversal-cikisa birakildiginda bile mutlak zarar kapagi
+    # (giris aleyhine bu % -> market kapat). Likidasyon kuyrugunu sinirlar.
+    V3_HARD_CAP_PCT = float(os.getenv("V3_HARD_CAP_PCT", "1.5"))
+    # Pre-TP1 koruma: felaket tavani + reversal-oncelikli cikis (borsa SL'sinden once)
+    V3_PROTECTIVE_EXIT_ENABLED = os.getenv("V3_PROTECTIVE_EXIT_ENABLED", "true").lower() in ("1", "true", "yes")
+    # Reversal-cikis CVD esigi: pozisyon zararda iken akis bu kadar ters olursa kapat
+    V3_REVERSAL_EXIT_CVD = float(os.getenv("V3_REVERSAL_EXIT_CVD", "3000"))
+    # Korumali cikistan sonra ayni/yeni yon icin yeniden giris bekleme suresi.
+    # Ac-kapa cigini (skor-exit -> aninda tekrar ac -> skor-exit ...) onler.
+    V3_REENTRY_COOLDOWN_SEC = float(os.getenv("V3_REENTRY_COOLDOWN_SEC", "120"))
+    # Score-exit min tutus: taze pozisyon bu sureden once skor-zayif ile kapatilmaz.
+    V3_SCORE_EXIT_MIN_HOLD_SEC = float(os.getenv("V3_SCORE_EXIT_MIN_HOLD_SEC", "60"))
+    # Fade yapi-hizasi: yapi karsi-yonde bu kadar onde ise (skor farki) o yone
+    # fade yok. counter-trend fade (ayi yapida destek-long) bleed'ini keser.
+    V3_FADE_STRUCT_ALIGN_GAP = float(os.getenv("V3_FADE_STRUCT_ALIGN_GAP", "30"))
+    # MFE trail: TP1 sonrasi ulasilan en iyi fiyatin bu kesrini SL ile kilitle.
+    # Her 1m calisir (kapanis beklemez), kar geri vermeyi azaltir. 0.5 = yarisini koru.
+    # MFE trail KAPALI: cok sikiydi, gurultu sicramasinda erken atiyordu. Yerine
+    # yapisal trail (swing arkasi) kullaniliyor — yapi bozulmadikca iceride kalir.
+    V3_MFE_TRAIL_ENABLED = os.getenv("V3_MFE_TRAIL_ENABLED", "false").lower() in ("1", "true", "yes")
+    V3_MFE_LOCK_FRAC = float(os.getenv("V3_MFE_LOCK_FRAC", "0.5"))
+    # Yapisal runner trail: SL'yi en yakin karsi-swing arkasina koy, her 1m guncelle.
+    V3_STRUCT_TRAIL_ENABLED = os.getenv("V3_STRUCT_TRAIL_ENABLED", "true").lower() in ("1", "true", "yes")
+    # Akis-teyit kapisi (veri: akisa-ters 93 islem -4.19, akis-uyumlu ~basabas).
+    # Giriste akis o yonu desteklemeli: SHORT->buy_ratio<=0.5, LONG->buy_ratio>=0.5.
+    V3_FADE_FLOW_CONFIRM = os.getenv("V3_FADE_FLOW_CONFIRM", "true").lower() in ("1", "true", "yes")
+    V3_FADE_FLOW_RATIO = float(os.getenv("V3_FADE_FLOW_RATIO", "0.50"))
+    # Ogrenme dongusu: her pozisyon kapanisinda PerfCtx'i yeniden hesapla
+    # (win-rate -> risk carpani). Idempotent; seansi yeniden baslatmaya gerek yok.
+    V3_PERF_CTX_ON_CLOSE = os.getenv("V3_PERF_CTX_ON_CLOSE", "true").lower() in ("1", "true", "yes")
+    # (a) Borsa SL'sini felaket tavani mesafesine genislet (gurultu otesi). Boyut
+    # risk-bazli kuculur; genis SL ile RR yeniden dogrulanir (sub-min-RR dusulur).
+    V3_WIDEN_SL_TO_CAP = os.getenv("V3_WIDEN_SL_TO_CAP", "false").lower() in ("1", "true", "yes")
+    # Cikis debounce: cikis kosulu art arda bu kadar tick dogru olmali (anlik gurultu
+    # tek-tick'te kapatmasin). Zaman degil, ardisik okuma sayisi.
+    V3_EXIT_CONFIRM_TICKS = int(os.getenv("V3_EXIT_CONFIRM_TICKS", "3"))
+    # Runner reversal icin akis-ters ANLAMLI buyukluk esigi (zayif tek-tick etiket degil)
+    V3_RUNNER_REV_MIN_CUM = float(os.getenv("V3_RUNNER_REV_MIN_CUM", "2500"))
+    # Skor-farkinda erken cikis: prob_side bu esigin altina ARDISIK duserse cik (tez zayif).
+    V3_SCORE_EXIT_PROB = float(os.getenv("V3_SCORE_EXIT_PROB", "0.55"))
+    # Kanal-fade trend filtresi: guclu ters trendde (15m guc>=esik) fade acma
+    V3_CHANNEL_FADE_TREND_FILTER = os.getenv("V3_CHANNEL_FADE_TREND_FILTER", "true").lower() in ("1", "true", "yes")
+    V3_CHANNEL_FADE_TREND_STR = float(os.getenv("V3_CHANNEL_FADE_TREND_STR", "80"))
+    # Açılış ısınması: REST CVD bootstrap sonrası kısa canlı akış penceresi (koruma)
     V3_STARTUP_WARMUP_ENABLED = os.getenv("V3_STARTUP_WARMUP_ENABLED", "true").lower() in ("1", "true", "yes")
-    V3_STARTUP_WARMUP_MIN_SEC = float(os.getenv("V3_STARTUP_WARMUP_MIN_SEC", "150"))
-    V3_STARTUP_REQUIRE_5M_CLOSE = os.getenv("V3_STARTUP_REQUIRE_5M_CLOSE", "true").lower() in ("1", "true", "yes")
+    V3_STARTUP_WARMUP_MIN_SEC = float(os.getenv("V3_STARTUP_WARMUP_MIN_SEC", "30"))
+    V3_STARTUP_REQUIRE_5M_CLOSE = os.getenv("V3_STARTUP_REQUIRE_5M_CLOSE", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    # Karar LONG/SHORT iken execute engeli sayaçları (data/good_signal_blocked.json)
+    V3_GOOD_SIGNAL_STATS_ENABLED = os.getenv("V3_GOOD_SIGNAL_STATS_ENABLED", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    V3_GOOD_SIGNAL_LOG_SEC = float(os.getenv("V3_GOOD_SIGNAL_LOG_SEC", "3600"))
+    # Karar katmani WAIT engeli (data/decision_blocked.json + scripts/decision_block_report.py)
+    V3_DECISION_BLOCK_STATS_ENABLED = os.getenv(
+        "V3_DECISION_BLOCK_STATS_ENABLED", "true"
+    ).lower() in ("1", "true", "yes")
+    V3_DECISION_BLOCK_LOG_SEC = float(os.getenv("V3_DECISION_BLOCK_LOG_SEC", "3600"))
+    V3_DECISION_BLOCK_EVENT_LOG_SEC = float(
+        os.getenv("V3_DECISION_BLOCK_EVENT_LOG_SEC", "45")
+    )
     # RANGE_BUY / RANGE_SELL: yon bazli min skor + guc (BUY siki, SELL daha esnek)
     V3_MIN_RANGE_SCORE = int(os.getenv("V3_MIN_RANGE_SCORE", "10"))
     V3_MIN_RANGE_SCORE_BUY = int(

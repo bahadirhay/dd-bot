@@ -17,6 +17,41 @@ def _conn():
     c.row_factory = sqlite3.Row
     return c
 
+def _migrate_v3_attribution_columns(db: sqlite3.Connection) -> None:
+    """Mevcut DB: reject_reason kolonu."""
+    cols = {r[1] for r in db.execute("PRAGMA table_info(v3_attribution)").fetchall()}
+    if "reject_reason" not in cols:
+        db.execute("ALTER TABLE v3_attribution ADD COLUMN reject_reason TEXT")
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_v3attr_reject "
+            "ON v3_attribution(reject_reason, ts DESC)"
+        )
+
+
+def _migrate_trades_learning_columns(db: sqlite3.Connection) -> None:
+    """
+    Ogrenme altyapisi: her trade'e giris-baglami + sonuc-uc noktalari ekler.
+    Bot bu sutunlardan hangi kurulumun kazandigini ogrenebilir (offline/online).
+    Hepsi nullable; eski kayitlar NULL kalir.
+    """
+    cols = {r[1] for r in db.execute("PRAGMA table_info(trades)").fetchall()}
+    add = {
+        "entry_to_edge_bps": "REAL",   # girisin fade/breakout seviyesine uzakligi (bps)
+        "buy_ratio_at_open": "REAL",   # acilis taker alis orani (akis teyidi)
+        "zone_at_open": "TEXT",        # NEAR_SUPPORT/NEAR_RESISTANCE/MID_RANGE
+        "path_at_open": "TEXT",        # fade / breakout
+        "struct_long_at_open": "REAL",
+        "struct_short_at_open": "REAL",
+        "tp1_bps": "REAL",             # giris->TP1 mesafesi (bps)
+        "sl_bps": "REAL",              # giris->SL mesafesi (bps)
+        "mfe_bps": "REAL",             # max lehte hareket (bps) — kapanista
+        "mae_bps": "REAL",             # max aleyhte hareket (bps) — kapanista
+    }
+    for name, typ in add.items():
+        if name not in cols:
+            db.execute(f"ALTER TABLE trades ADD COLUMN {name} {typ}")
+
+
 def init():
     with _conn() as db:
         db.executescript("""
@@ -127,13 +162,63 @@ def init():
             payload_json  TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS sr_changes (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts            REAL NOT NULL,
+            ts_human      TEXT,
+            price         REAL,
+            old_support   REAL,
+            new_support   REAL,
+            old_resistance REAL,
+            new_resistance REAL,
+            d_support     REAL,          -- |yeni_S - eski_S| pt
+            d_resistance  REAL,          -- |yeni_R - eski_R| pt
+            support_reason   TEXT,
+            resistance_reason TEXT,
+            dist_support_pt  REAL,       -- px ile yeni destek arasi mesafe (pt)
+            dist_resistance_pt REAL,     -- px ile yeni direnc arasi mesafe (pt)
+            band_old_pt   REAL,
+            band_new_pt   REAL,
+            touched       INTEGER        -- 1: px degisen kenara dokunma toleransinda
+        );
+
         CREATE INDEX IF NOT EXISTS idx_signals_ts ON signals(ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_sr_changes_ts ON sr_changes(ts DESC);
         CREATE INDEX IF NOT EXISTS idx_trades_ts  ON trades(open_ts DESC);
         CREATE INDEX IF NOT EXISTS idx_regime_ts  ON regime_log(ts DESC);
         CREATE INDEX IF NOT EXISTS idx_snap_ts ON market_snapshots(ts DESC);
         CREATE INDEX IF NOT EXISTS idx_snap_kind ON market_snapshots(kind, ts DESC);
         CREATE INDEX IF NOT EXISTS idx_event_ts ON market_events(ts DESC);
+
+        CREATE TABLE IF NOT EXISTS v3_attribution (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts              REAL NOT NULL,
+            ts_human        TEXT,
+            price           REAL,
+            action          TEXT,
+            scenario        TEXT,
+            intended_side   TEXT,
+            trade_candidate INTEGER DEFAULT 0,
+            entered         INTEGER DEFAULT 0,
+            blocked         INTEGER DEFAULT 0,
+            trade_id        INTEGER,
+            reason_text     TEXT,
+            trade_reason_json TEXT,
+            block_reason_json TEXT,
+            trade_reason_sum INTEGER DEFAULT 0,
+            block_reason_sum INTEGER DEFAULT 0,
+            net_score       INTEGER DEFAULT 0,
+            primary_block   TEXT,
+            primary_support   TEXT,
+            context_json    TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_v3attr_ts ON v3_attribution(ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_v3attr_block ON v3_attribution(primary_block, ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_v3attr_trade ON v3_attribution(trade_id);
         """)
+        _migrate_v3_attribution_columns(db)
+        _migrate_trades_learning_columns(db)
     print("DB hazır:", cfg.DB_PATH)
     try:
         n = backfill_closed_trade_metrics()
@@ -334,6 +419,27 @@ def log_trade_open(data: dict) -> int:
         return cur.lastrowid
 
 
+def update_trade_open_features(trade_id: int, feats: dict) -> None:
+    """Ogrenme sutunlarini (giris-baglami) gunceller. Sadece verilen alanlar."""
+    if not trade_id or not feats:
+        return
+    allowed = {
+        "entry_to_edge_bps", "buy_ratio_at_open", "zone_at_open", "path_at_open",
+        "struct_long_at_open", "struct_short_at_open", "tp1_bps", "sl_bps",
+        "mfe_bps", "mae_bps",
+    }
+    items = {k: v for k, v in feats.items() if k in allowed and v is not None}
+    if not items:
+        return
+    sets = ", ".join(f"{k}=:{k}" for k in items)
+    items["_id"] = trade_id
+    try:
+        with _conn() as db:
+            db.execute(f"UPDATE trades SET {sets} WHERE id=:_id", items)
+    except Exception:
+        pass
+
+
 def update_trade_entry(trade_id: int, entry_price: float, qty: float | None = None) -> None:
     if trade_id <= 0 or entry_price <= 0:
         return
@@ -398,6 +504,65 @@ def reconcile_open_trades_with_exchange(
                 (now, entry_price, entry_price, dur, oid),
             )
         return keep_id
+
+
+def parse_tp1_original_from_notes(notes: str) -> float:
+    """notes icinde tp1o= tokeni (giris anindaki orijinal TP1)."""
+    for token in (notes or "").replace("|", " ").split():
+        if token.startswith("tp1o="):
+            try:
+                return float(token[5:])
+            except ValueError:
+                pass
+    return 0.0
+
+
+def notes_tp1_restored(notes: str) -> bool:
+    return "tp1r=1" in (notes or "").replace("|", " ")
+
+
+def merge_notes_with_tp1_original(notes: str, tp1: float) -> str:
+    tokens = [
+        t
+        for t in (notes or "canli").replace("|", " ").split()
+        if t and not t.startswith("tp1o=") and not t.startswith("tp1r=")
+    ]
+    if tp1 > 0:
+        tokens.append(f"tp1o={tp1:.2f}")
+    return " ".join(tokens) if tokens else "canli"
+
+
+def update_trade_entry_tp1_original(trade_id: int, tp1: float) -> None:
+    if trade_id <= 0 or tp1 <= 0:
+        return
+    with _conn() as db:
+        row = db.execute(
+            "SELECT notes FROM trades WHERE id=? AND status='OPEN'",
+            (trade_id,),
+        ).fetchone()
+    if not row:
+        return
+    notes = merge_notes_with_tp1_original(str(row["notes"] or ""), tp1)
+    with _conn() as db:
+        db.execute("UPDATE trades SET notes=? WHERE id=?", (notes, trade_id))
+
+
+def mark_trade_tp1_restored(trade_id: int) -> None:
+    if trade_id <= 0:
+        return
+    with _conn() as db:
+        row = db.execute(
+            "SELECT notes FROM trades WHERE id=? AND status='OPEN'",
+            (trade_id,),
+        ).fetchone()
+    if not row:
+        return
+    notes = str(row["notes"] or "")
+    if notes_tp1_restored(notes):
+        return
+    notes = f"{notes} tp1r=1".strip()
+    with _conn() as db:
+        db.execute("UPDATE trades SET notes=? WHERE id=?", (notes, trade_id))
 
 
 def parse_entry_anchors_from_notes(notes: str) -> tuple[float, float]:
@@ -481,6 +646,37 @@ def get_trade_levels(trade_id: int) -> dict | None:
         "tp1_hit": bool(int(row["tp1_hit"] or 0)),
         "be_activated": bool(int(row["be_activated"] or 0)),
     }
+
+
+def update_open_trade_sl(trade_id: int, sl: float) -> None:
+    """Restart restore sirasinda hatali OPEN trade SL seviyesini onar."""
+    if trade_id <= 0 or sl <= 0:
+        return
+    with _conn() as db:
+        db.execute(
+            "UPDATE trades SET sl=? WHERE id=? AND status='OPEN'",
+            (float(sl), int(trade_id)),
+        )
+
+
+def update_open_trade_tps(trade_id: int, tp1: float = 0.0, tp2: float = 0.0) -> None:
+    """Borsada manuel degisen TP seviyelerini OPEN trade kaydina yansit."""
+    if trade_id <= 0 or (tp1 <= 0 and tp2 <= 0):
+        return
+    sets: list[str] = []
+    vals: list[float | int] = []
+    if tp1 > 0:
+        sets.append("tp1=?")
+        vals.append(float(tp1))
+    if tp2 > 0:
+        sets.append("tp2=?")
+        vals.append(float(tp2))
+    vals.append(int(trade_id))
+    with _conn() as db:
+        db.execute(
+            f"UPDATE trades SET {', '.join(sets)} WHERE id=? AND status='OPEN'",
+            vals,
+        )
 
 
 def get_open_trade_flags() -> dict:
@@ -628,6 +824,33 @@ def log_trade_close(trade_id: int, data: dict):
         """, data)
 
 
+def log_sr_change(data: dict) -> None:
+    """S/R aktif kenar degisimi audit kaydi (yalniz gercek degisimde cagrilir)."""
+    from datetime import datetime, timezone
+
+    data.setdefault("ts", time.time())
+    data["ts_human"] = datetime.fromtimestamp(
+        data["ts"], tz=timezone.utc
+    ).strftime("%Y-%m-%d %H:%M:%S UTC")
+    try:
+        with _conn() as db:
+            db.execute(
+                """
+                INSERT INTO sr_changes
+                (ts,ts_human,price,old_support,new_support,old_resistance,new_resistance,
+                 d_support,d_resistance,support_reason,resistance_reason,
+                 dist_support_pt,dist_resistance_pt,band_old_pt,band_new_pt,touched)
+                VALUES
+                (:ts,:ts_human,:price,:old_support,:new_support,:old_resistance,:new_resistance,
+                 :d_support,:d_resistance,:support_reason,:resistance_reason,
+                 :dist_support_pt,:dist_resistance_pt,:band_old_pt,:band_new_pt,:touched)
+                """,
+                data,
+            )
+    except Exception:
+        pass
+
+
 def log_regime_change(data: dict):
     from datetime import datetime, timezone
     data["ts_human"] = datetime.fromtimestamp(
@@ -712,3 +935,287 @@ def get_stats(hours: int = 24) -> dict:
                                 max(signals_r["total"] or 1, 1) * 100, 1),
         "top_no_entry"  : [(r["no_entry_reason"], r["cnt"]) for r in no_entry],
     }
+
+
+def log_v3_attribution(attr: dict) -> int:
+    """V3 attribution kaydi — trade_reason / block_reason."""
+    from datetime import datetime, timezone
+
+    from core.state import state as bot_state
+
+    ts = float(attr.get("ts") or time.time())
+    ts_human = datetime.fromtimestamp(ts, tz=timezone.utc).strftime(
+        "%Y-%m-%d %H:%M:%S UTC"
+    )
+    with _conn() as db:
+        cur = db.execute(
+            """
+            INSERT INTO v3_attribution
+            (ts, ts_human, price, action, scenario, intended_side,
+             trade_candidate, entered, blocked, trade_id, reason_text,
+             trade_reason_json, block_reason_json,
+             trade_reason_sum, block_reason_sum, net_score,
+             primary_block, primary_support, reject_reason, context_json)
+            VALUES
+            (?, ?, ?, ?, ?, ?,
+             ?, ?, ?, ?, ?,
+             ?, ?,
+             ?, ?, ?,
+             ?, ?, ?, ?)
+            """,
+            (
+                ts,
+                ts_human,
+                float(attr.get("price") or 0),
+                str(attr.get("action") or "WAIT"),
+                str(attr.get("scenario") or ""),
+                str(attr.get("intended_side") or ""),
+                1 if attr.get("trade_candidate") else 0,
+                1 if attr.get("entered") or attr.get("would_trade") else 0,
+                1 if attr.get("blocked_opportunity") else 0,
+                int(attr.get("trade_id") or 0) or None,
+                str(attr.get("reason_text") or "")[:2000],
+                json.dumps(attr.get("trade_reason") or {}, ensure_ascii=False),
+                json.dumps(attr.get("block_reason") or {}, ensure_ascii=False),
+                int(attr.get("trade_reason_sum") or 0),
+                int(attr.get("block_reason_sum") or 0),
+                int(attr.get("net_score") or 0),
+                str(attr.get("primary_block") or ""),
+                str(attr.get("primary_support") or ""),
+                str(attr.get("reject_reason") or ""),
+                json.dumps(
+                    attr.get("context")
+                    or {
+                        "liquidity_bias": bot_state.v3_liquidity_bias,
+                        "vacuum_score": bot_state.v3_vacuum_score,
+                        "multi_tf_trend": bot_state.v3_multi_tf_trend,
+                    },
+                    ensure_ascii=False,
+                    default=str,
+                ),
+            ),
+        )
+        return int(cur.lastrowid)
+
+
+def reject_reason_stats(*, limit: int = 100, hours: int = 0) -> list[tuple[str, int]]:
+    """REJECT_REASON sayilari (son limit kayit veya saat penceresi)."""
+    with _conn() as db:
+        if hours > 0:
+            cutoff = time.time() - hours * 3600
+            rows = db.execute(
+                """
+                SELECT reject_reason, COUNT(*) AS cnt
+                FROM v3_attribution
+                WHERE ts > ? AND action='WAIT' AND reject_reason != ''
+                GROUP BY reject_reason
+                ORDER BY cnt DESC
+                """,
+                (cutoff,),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT reject_reason, COUNT(*) AS cnt
+                FROM (
+                    SELECT reject_reason FROM v3_attribution
+                    WHERE action='WAIT' AND reject_reason != ''
+                    ORDER BY ts DESC
+                    LIMIT ?
+                )
+                GROUP BY reject_reason
+                ORDER BY cnt DESC
+                """,
+                (max(int(limit), 1),),
+            ).fetchall()
+    return [(str(r["reject_reason"]), int(r["cnt"])) for r in rows]
+
+
+def link_v3_attribution_trade(
+    attribution_id: int,
+    trade_id: int,
+    *,
+    entered: int = 1,
+    action: str = "",
+    intended_side: str = "",
+) -> int:
+    """Trade ile attribution bagla. Baglanan attribution id dondurur (0=basarisiz)."""
+    if trade_id <= 0:
+        return 0
+    side = str(intended_side or action or "").upper()
+    if side in ("BUY",):
+        side = "LONG"
+    elif side in ("SELL",):
+        side = "SHORT"
+    act = str(action or "").upper()
+    if act in ("BUY",):
+        act = "LONG"
+    elif act in ("SELL",):
+        act = "SHORT"
+
+    with _conn() as db:
+        if attribution_id > 0:
+            db.execute(
+                """
+                UPDATE v3_attribution
+                SET trade_id=?, entered=?, blocked=0,
+                    action=CASE
+                        WHEN ? != '' AND action='WAIT' THEN ?
+                        WHEN ? != '' THEN ?
+                        ELSE action
+                    END
+                WHERE id=?
+                """,
+                (trade_id, entered, act, act, act, act, attribution_id),
+            )
+            return int(attribution_id)
+
+        cutoff = time.time() - 180.0
+        row = None
+        if side in ("LONG", "SHORT"):
+            row = db.execute(
+                """
+                SELECT id FROM v3_attribution
+                WHERE trade_id IS NULL AND ts > ?
+                  AND (
+                    action = ?
+                    OR (action IN ('LONG','SHORT') AND action = ?)
+                    OR (trade_candidate=1 AND intended_side IN (?, ?))
+                  )
+                ORDER BY ts DESC LIMIT 1
+                """,
+                (
+                    cutoff,
+                    side,
+                    side,
+                    side,
+                    "BUY" if side == "LONG" else "SELL",
+                ),
+            ).fetchone()
+        if not row:
+            row = db.execute(
+                """
+                SELECT id FROM v3_attribution
+                WHERE trade_id IS NULL AND ts > ?
+                  AND action IN ('LONG', 'SHORT')
+                ORDER BY ts DESC LIMIT 1
+                """,
+                (cutoff,),
+            ).fetchone()
+        if not row:
+            row = db.execute(
+                """
+                SELECT id FROM v3_attribution
+                WHERE trade_id IS NULL AND ts > ?
+                ORDER BY ts DESC LIMIT 1
+                """,
+                (cutoff,),
+            ).fetchone()
+        if row:
+            aid = int(row["id"])
+            db.execute(
+                """
+                UPDATE v3_attribution
+                SET trade_id=?, entered=?, blocked=0,
+                    action=CASE WHEN ? != '' THEN ? ELSE action END
+                WHERE id=?
+                """,
+                (trade_id, entered, act, act, aid),
+            )
+            return aid
+    return 0
+
+
+def append_trade_attribution_notes(trade_id: int, notes_json: str) -> None:
+    if trade_id <= 0:
+        return
+    tag = f"attr:{notes_json[:600]}"
+    with _conn() as db:
+        row = db.execute(
+            "SELECT notes FROM trades WHERE id=?", (trade_id,)
+        ).fetchone()
+        old = str(row["notes"] or "") if row else ""
+        if "attr:" in old:
+            base = old.split("attr:")[0].strip()
+            new_notes = f"{base} {tag}".strip() if base else tag
+        else:
+            new_notes = f"{old} {tag}".strip() if old else tag
+        db.execute(
+            "UPDATE trades SET notes=? WHERE id=?",
+            (new_notes[:2000], trade_id),
+        )
+
+
+def attribution_block_stats(hours: int = 24 * 14) -> list[dict]:
+    """primary_block bazinda engel sayilari."""
+    cutoff = time.time() - hours * 3600
+    with _conn() as db:
+        rows = db.execute(
+            """
+            SELECT primary_block, COUNT(*) AS cnt,
+                   SUM(trade_reason_sum) AS avg_support,
+                   SUM(block_reason_sum) AS total_block
+            FROM v3_attribution
+            WHERE ts > ? AND blocked=1 AND primary_block != ''
+            GROUP BY primary_block
+            ORDER BY cnt DESC
+            """,
+            (cutoff,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def attribution_blocked_with_outcome(
+    hours: int = 24 * 14,
+    forward_sec: float = 4 * 3600,
+) -> list[dict]:
+    """
+    Engellenen firsatlar + sonraki fiyat hareketi (market_snapshots).
+    Basit counterfactual: intended_side SHORT ise fiyat dususu = 'would_win'.
+    """
+    cutoff = time.time() - hours * 3600
+    out: list[dict] = []
+    with _conn() as db:
+        rows = db.execute(
+            """
+            SELECT id, ts, price, intended_side, primary_block,
+                   trade_reason_sum, block_reason_sum, scenario
+            FROM v3_attribution
+            WHERE ts > ? AND blocked=1 AND intended_side != ''
+            ORDER BY ts DESC
+            """,
+            (cutoff,),
+        ).fetchall()
+        for row in rows:
+            ts0 = float(row["ts"])
+            p0 = float(row["price"] or 0)
+            side = str(row["intended_side"] or "").upper()
+            if p0 <= 0:
+                continue
+            snaps = db.execute(
+                """
+                SELECT price FROM market_snapshots
+                WHERE ts > ? AND ts <= ? AND price > 0
+                ORDER BY ts ASC
+                """,
+                (ts0, ts0 + forward_sec),
+            ).fetchall()
+            if not snaps:
+                out.append({**dict(row), "outcome": "unknown", "move_pct": 0.0})
+                continue
+            prices = [float(s["price"]) for s in snaps]
+            p_min, p_max = min(prices), max(prices)
+            if side in ("SELL", "SHORT"):
+                move_pct = (p0 - p_min) / p0 * 100
+                would_win = move_pct >= 0.15
+            else:
+                move_pct = (p_max - p0) / p0 * 100
+                would_win = move_pct >= 0.15
+            out.append(
+                {
+                    **dict(row),
+                    "outcome": "would_win" if would_win else "would_lose",
+                    "move_pct": round(move_pct, 3),
+                }
+            )
+    return out

@@ -162,6 +162,28 @@ async def paper_open(plan: Plan, signal_id: int = 0) -> bool:
             "notes": "paper",
         }
     )
+    try:
+        from botlog.db import update_trade_open_features
+        from botlog.trade_features import collect_open_features
+
+        update_trade_open_features(
+            _trade_id,
+            collect_open_features(plan.direction, fill, plan.tp1, plan.sl),
+        )
+    except Exception:
+        pass
+    try:
+        from engine.attribution_v3 import attach_attribution_to_trade
+
+        attach_attribution_to_trade(_trade_id)
+    except Exception:
+        pass
+    try:
+        from engine.execution_brain_v3 import snapshot_trade_brain
+
+        snapshot_trade_brain()
+    except Exception:
+        pass
     return True
 
 
@@ -275,7 +297,7 @@ async def paper_close(reason: str = "signal") -> float:
 
     from execution.position_lifecycle import finalize_position_closed
 
-    finalize_position_closed(reason, source="paper")
+    finalize_position_closed(reason, source="paper", exit_px=exit_px)
     _partial_pnl = 0.0
     _trade_id = 0
 
@@ -316,7 +338,7 @@ async def paper_sync_position() -> bool:
         return False
     _mark_unrealized()
     if _sl_hit():
-        await paper_close("sl_hit")
+        await paper_close("runner_sl" if state.pos_tp1_hit else "sl_hit")
         return False
     from core.config import cfg
 

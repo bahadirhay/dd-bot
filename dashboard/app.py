@@ -53,6 +53,33 @@ _S = {"fontSize": "13px", "color": C["muted"], "lineHeight": "1.45"}
 _B = {"fontWeight": "600"}
 
 
+def _sr_display_role(price: float, level: float, nominal: str) -> tuple[str, str, str]:
+    """Grafik etiketi fiyatın hangi tarafında olduğuna göre rolü göstermeli."""
+    px = float(price or 0)
+    lv = float(level or 0)
+    tol = max(abs(px) * 0.0001, 0.05) if px > 0 else 0.0
+    if lv <= 0:
+        return "", C["muted"], "dot"
+    if nominal == "support":
+        if px > 0 and lv > px + tol:
+            return "Kırılan Destek", C["orange"], "dash"
+        return "Aktif Destek", C["blue"], "solid"
+    if px > 0 and lv < px - tol:
+        return "Kırılan Direnç", C["orange"], "dash"
+    return "Aktif Direnç", C["blue"], "solid"
+
+
+def _active_band_text(price: float, support: float, resistance: float) -> str:
+    parts = []
+    if resistance > 0:
+        r_label, _, _ = _sr_display_role(price, resistance, "resistance")
+        parts.append(f"{r_label} {resistance:.2f}")
+    if support > 0:
+        s_label, _, _ = _sr_display_role(price, support, "support")
+        parts.append(f"{s_label} {support:.2f}")
+    return " / ".join(parts) if parts else "—"
+
+
 def _card(title, content_id, color_left=None):
     style = {
         "backgroundColor": C["card"],
@@ -85,6 +112,11 @@ def _metric_row(label, val_id, color=C["text"], size="20px"):
     ])
 
 
+def _short(text: str, n: int = 110) -> str:
+    t = str(text or "").strip().replace("\n", " ")
+    return t if len(t) <= n else (t[: n - 1] + "…")
+
+
 app.layout = dbc.Container([
 
     # ── Header ────────────────────────────────────────────────
@@ -100,46 +132,69 @@ app.layout = dbc.Container([
     ], className="py-2 px-3",
        style={"backgroundColor": C["card"], "borderBottom": f"1px solid {C['border']}"}),
 
-    # ── Metrik bantı ──────────────────────────────────────────
+    # ── Metrik bantı (5 kart — rejim ayri satirda) ─────────────
     dbc.Row([
         dbc.Col(dbc.Card(dbc.CardBody([
             html.Div("FIYAT", style=_S),
             html.Div(id="m-price", style={"fontSize":"24px","fontWeight":"bold","color":C["blue"]}),
             html.Div(id="m-spread", style={**_S, "marginTop":"2px"}),
         ]), style={"backgroundColor":C["card"],"border":f"1px solid {C['border']}",
-                   "borderLeft":f"3px solid {C['blue']}"}), width=2),
+                   "borderLeft":f"3px solid {C['blue']}"}), width=True),
 
         dbc.Col(dbc.Card(dbc.CardBody([
             html.Div("BAKİYE", style=_S),
             html.Div(id="m-balance", style={"fontSize":"24px","fontWeight":"bold","color":C["green"]}),
             html.Div(id="m-api-status", style={**_S, "marginTop":"2px"}),
         ]), style={"backgroundColor":C["card"],"border":f"1px solid {C['border']}",
-                   "borderLeft":f"3px solid {C['green']}"}), width=2),
-
-        dbc.Col(dbc.Card(dbc.CardBody([
-            html.Div("REJİM", style=_S),
-            html.Div(id="m-regime", style={"fontSize":"24px","fontWeight":"bold"}),
-            html.Div(id="m-score", style={**_S, "marginTop":"2px"}),
-        ]), style={"backgroundColor":C["card"],"border":f"1px solid {C['border']}"}), width=2),
+                   "borderLeft":f"3px solid {C['green']}"}), width=True),
 
         dbc.Col(dbc.Card(dbc.CardBody([
             html.Div("FLOW", style=_S),
             html.Div(id="m-cvd", style={"fontSize":"24px","fontWeight":"bold"}),
             html.Div(id="m-taker", style={**_S, "marginTop":"2px"}),
-        ]), style={"backgroundColor":C["card"],"border":f"1px solid {C['border']}"}), width=2),
+        ]), style={"backgroundColor":C["card"],"border":f"1px solid {C['border']}"}), width=True),
 
         dbc.Col(dbc.Card(dbc.CardBody([
             html.Div("SETUP", style=_S),
             html.Div(id="m-pos", style={"fontSize":"20px","fontWeight":"bold"}),
             html.Div(id="m-pos2", style={**_S, "marginTop":"2px"}),
-        ]), style={"backgroundColor":C["card"],"border":f"1px solid {C['border']}"}), width=2),
+        ]), style={"backgroundColor":C["card"],"border":f"1px solid {C['border']}"}), width=True),
 
         dbc.Col(dbc.Card(dbc.CardBody([
             html.Div("EXECUTION", style=_S),
             html.Div(id="m-funding", style={"fontSize":"18px","fontWeight":"bold"}),
             html.Div(id="m-oi", style={**_S, "marginTop":"2px"}),
-        ]), style={"backgroundColor":C["card"],"border":f"1px solid {C['border']}"}), width=2),
+        ]), style={"backgroundColor":C["card"],"border":f"1px solid {C['border']}"}), width=True),
     ], className="px-2 pt-2 g-2"),
+
+    # ── Rejim — tam genişlik, tek satır (sayfayı itmesin) ───────
+    dbc.Row([
+        dbc.Col(dbc.Card(dbc.CardBody([
+            html.Div("REJİM", style={**_S, "marginBottom": "4px"}),
+            html.Div(
+                id="m-regime",
+                style={
+                    "fontSize": "22px",
+                    "fontWeight": "bold",
+                    "lineHeight": "1.2",
+                    "marginBottom": "4px",
+                },
+            ),
+            html.Div(
+                id="m-score",
+                style={
+                    **_S,
+                    "fontSize": "12px",
+                    "lineHeight": "1.35",
+                    "whiteSpace": "nowrap",
+                    "overflow": "hidden",
+                    "textOverflow": "ellipsis",
+                },
+            ),
+        ], style={"padding": "10px 14px"}),
+        style={"backgroundColor": C["card"], "border": f"1px solid {C['border']}"}),
+        width=12),
+    ], className="px-2 g-2"),
 
     # ── Ana grafik (tam genişlik) ───────────────────────────────
     dbc.Row([
@@ -483,8 +538,14 @@ def update_fast(_):
         reg_code,
         (m["regime_display"] if not regime_never_ran else "—", C["yellow"] if regime_never_ran else C["muted"]),
     )
-    regime_sub = reg_detail or m["regime_sub"]
-    regime_style = {"fontSize":"24px","fontWeight":"bold","color": rc}
+    regime_sub = _short(reg_detail or m["regime_sub"], 220)
+    regime_style = {
+        "fontSize": "22px",
+        "fontWeight": "bold",
+        "color": rc,
+        "lineHeight": "1.2",
+        "marginBottom": "4px",
+    }
 
     # Yapi
     structure = op.get("structure") or {}
@@ -527,34 +588,25 @@ def update_fast(_):
     active_struct_s = float(structure.get("active_major_support") or 0)
     v3_r = float(v3_levels.get("active_resistance") or 0)
     v3_s = float(v3_levels.get("active_support") or 0)
+    v3_macro_r = float(v3_levels.get("macro_resistance") or 0)
+    v3_macro_s = float(v3_levels.get("macro_support") or 0)
     v3_scn = str(v3_scenario.get("name") or "")
     v3_action = str(v3_decision.get("action") or "")
     v3_reason = str(v3_decision.get("reason") or "")
     v3_pos = float(v3_levels.get("range_position", 0.5) or 0.5)
     v3_1h = str(((v3_structure.get("1h") or {}).get("direction")) or "?")
+    zone = str(v3_levels.get("zone") or "MID_RANGE")
+    band_txt = _active_band_text(price, v3_s, v3_r)
+    macro_txt = (
+        _active_band_text(price, v3_macro_s, v3_macro_r)
+        if v3_levels.get("trade_band") and v3_macro_r > v3_macro_s > 0
+        else ""
+    )
+    band_display = f"trade={band_txt}" + (f" macro={macro_txt}" if macro_txt else "")
+    regime_sub = f"zone={zone} | {band_display} | 1h={v3_1h} | p={v3_pos:.2f}"
     v3_mode = bool(getattr(cfg, "STRATEGY_V3_ENABLED", False))
     if v3_mode and (v3_r > 0 or v3_s > 0 or v3_scn):
-        v3_band_line = (
-            f"V3 bant: R {v3_r:.2f} / S {v3_s:.2f}"
-            if v3_r > 0 or v3_s > 0
-            else "V3 bant: —"
-        )
-        zone = str(v3_levels.get("zone") or "MID_RANGE")
-        v3_scenario_line = (
-            f"Senaryo {v3_scn or '—'} · {v3_action or '—'} · zone {zone} · 1h {v3_1h} · p={v3_pos:.2f}"
-        )
-        v3_reason_line = f"{v3_reason or '—'}"
-        taker_str = html.Div(
-            [
-                html.Div(
-                    f"Taker {taker:.0%} · CVD {cvd_display} · {m.get('cvd_sub', '')}",
-                    style={"color": C["white"], "fontSize": "11px"},
-                ),
-                html.Div(v3_band_line, style={"color": C["blue"], "fontWeight": "600"}),
-                html.Div(v3_scenario_line, style={"color": C["yellow"], "fontSize": "11px"}),
-                html.Div(v3_reason_line, style={"color": C["muted"], "fontSize": "11px"}),
-            ]
-        )
+        taker_str = f"Taker {taker:.0%} · CVD {cvd_display}"
     elif main_r > 0 or main_s > 0 or struct_r > 0 or struct_s > 0:
         main_line = (
             f"Mavi bant: R {main_r:.2f} / S {main_s:.2f}"
@@ -583,42 +635,16 @@ def update_fast(_):
             if active_struct_r > 0 or active_struct_s > 0
             else "Aktif ref: —"
         )
-        v2_band_line = (
-            f"V3 bant: R {v3_r:.2f} / S {v3_s:.2f}"
-            if v3_r > 0 or v3_s > 0
-            else "V3 bant: —"
-        )
+        v2_band_line = f"V3 bant: {_active_band_text(price, v3_s, v3_r)}"
         v2_scenario_line = (
             f"V3 senaryo: {v3_scn or '—'} | karar {v3_action or '—'} | 1h {v3_1h} | p={v3_pos:.2f}"
         )
         v2_reason_line = f"V3 neden: {v3_reason or '—'}"
-        taker_str = html.Div(
-            [
-                html.Div(
-                    f"Taker {taker:.0%} · {struct_label} · {m.get('cvd_sub', '')}",
-                    style={"color": C["white"], "fontSize": "11px"},
-                ),
-                html.Div(main_line, style={"color": C["blue"]}),
-                html.Div(channel_line, style={"color": C["white"]}),
-                html.Div(ref_line, style={"color": C["muted"]}),
-                html.Div(active_line, style={"color": C["muted"]}),
-                html.Div(v2_band_line, style={"color": C["yellow"], "marginTop": "6px"}),
-                html.Div(v2_scenario_line, style={"color": C["muted"], "fontSize": "11px"}),
-                html.Div(v2_reason_line, style={"color": C["muted"], "fontSize": "11px"}),
-            ]
-        )
+        taker_str = f"Taker {taker:.0%} · CVD {cvd_display} · {struct_label}"
     else:
-        taker_str = html.Div(
-            [
-                html.Div(
-                    f"Taker {taker:.0%} · {struct_label} · {m.get('cvd_sub', '')}",
-                    style={"color": C["muted"], "fontSize": "11px"},
-                ),
-                html.Div(
-                    str(structure.get("structural_quality") or "majör seviye yok"),
-                    style={"color": C["muted"], "fontSize": "11px"},
-                ),
-            ]
+        taker_str = (
+            f"Taker {taker:.0%} · {struct_label} · "
+            f"{_short(str(structure.get('structural_quality') or 'majör seviye yok'), 70)}"
         )
 
     # Setup
@@ -633,7 +659,10 @@ def update_fast(_):
         C["muted"]
     )
     pos_str = setup_code
-    pos2_str = setup_detail or str(op.get("headline_detail") or state.no_entry_reason or "setup yok")
+    pos2_str = _short(
+        setup_detail or str(op.get("headline_detail") or state.no_entry_reason or "setup yok"),
+        95,
+    )
     pos_style = {"fontSize":"20px","fontWeight":"bold","color": setup_color}
 
     # Execution
@@ -652,7 +681,10 @@ def update_fast(_):
         exec_color = C["muted"]
     fund_style = {"fontSize":"18px","fontWeight":"bold","color": exec_color}
     next_bits = [x for x in (str(next_info.get("long_text") or ""), str(next_info.get("short_text") or "")) if x]
-    oi_str = " | ".join(next_bits[:2]) if next_bits else (str(execution.get("blocking_detail") or "") or "bir sonraki tetik yok")
+    oi_raw = " | ".join(next_bits[:2]) if next_bits else (
+        str(execution.get("blocking_detail") or "") or "bir sonraki tetik yok"
+    )
+    oi_str = _short(oi_raw, 95)
 
     return (
         hdr,
@@ -712,15 +744,46 @@ def _add_candlestick_trace(fig, bars, row, col, name):
     ), row=row, col=col)
 
 
-def _y_range_with_levels(bars, *levels):
-    """Mum + seviye çizgileri için Y ekseni (seviyeler mum dışında kalmasın)."""
+def _chart_price_window(bars, px: float) -> tuple[float, float]:
+    """Grafik odak penceresi: mumlar + fiyat; uzak makro katmanlar disarida."""
+    if not bars:
+        return (px * 0.94, px * 1.06) if px > 0 else (0.0, 0.0)
+    bar_lo = min(float(b.get("low") or 0) for b in bars)
+    bar_hi = max(float(b.get("high") or 0) for b in bars)
+    if px > 0:
+        bar_lo = min(bar_lo, px)
+        bar_hi = max(bar_hi, px)
+    margin = max((bar_hi - bar_lo) * 0.14, px * 0.05 if px > 0 else 30.0, 28.0)
+    return bar_lo - margin, bar_hi + margin
+
+
+def _level_in_chart_window(layer: dict, win_lo: float, win_hi: float) -> bool:
+    if not isinstance(layer, dict):
+        return False
+    lo = float(layer.get("low") or 0)
+    hi = float(layer.get("high") or 0)
+    if lo <= 0 or hi <= lo:
+        return False
+    return hi >= win_lo and lo <= win_hi
+
+
+def _y_range_with_levels(bars, *levels, px: float = 0.0):
+    """Mum + yakin seviye cizgileri icin Y ekseni (uzak makro zone ekseni ezmez)."""
+    win_lo, win_hi = _chart_price_window(bars, px)
     ys = []
     if bars:
-        ys.extend(b["low"] for b in bars)
-        ys.extend(b["high"] for b in bars)
+        ys.extend(float(b["low"]) for b in bars)
+        ys.extend(float(b["high"]) for b in bars)
+    if px > 0:
+        ys.append(px)
     for lv in levels:
-        if lv and float(lv) > 0:
-            ys.append(float(lv))
+        if not lv:
+            continue
+        v = float(lv)
+        if v <= 0:
+            continue
+        if win_lo <= v <= win_hi:
+            ys.append(v)
     if not ys:
         return None
     lo, hi = min(ys), max(ys)
@@ -811,7 +874,16 @@ def _add_breakout_levels(fig, row, col, bars, op=None):
     pos_v3 = bool(state.in_position) and str((state.position_breakout or {}).get("entry_mode") or "") == "v3"
     status = f"POZISYON_V3 {state.pos_side}" if pos_v3 else (scenario_name or "WAIT")
 
-    def _hline(y, color, dash, label, width=1.5):
+    def _hline(
+        y,
+        color,
+        dash,
+        label,
+        width=1.5,
+        *,
+        sr_label: bool = False,
+        label_yshift: int = 0,
+    ):
         if y <= 0:
             return
         fig.add_hline(
@@ -819,31 +891,90 @@ def _add_breakout_levels(fig, row, col, bars, op=None):
             line_dash=dash,
             line_color=color,
             line_width=width,
-            annotation_text=label,
-            annotation_position="right",
-            annotation_font_size=9,
-            annotation_font_color=color,
             row=row,
             col=col,
         )
+        if sr_label and label and bars:
+            fig.add_annotation(
+                x=_bar_dt(float(bars[-1]["ts"])),
+                y=y,
+                text=label,
+                showarrow=False,
+                xanchor="left",
+                xshift=8,
+                yanchor="middle",
+                yshift=label_yshift,
+                font=dict(size=9, color=color),
+                bgcolor="rgba(13,17,23,0.75)",
+                borderpad=2,
+                row=row,
+                col=col,
+            )
 
-    if main_r > 0:
-        _hline(
-            main_r,
-            C["blue"],
-            "dash" if fallback_used else "solid",
-            f"{'Grafik' if fallback_used else 'Ana'} direnç {main_r:.2f}",
-            width=2.6,
+    chart_win_lo, chart_win_hi = _chart_price_window(bars, px)
+
+    def _zone_band(key: str, label: str, color: str, fill: str) -> None:
+        layers = v3_levels.get("zone_layers") or {}
+        layer = layers.get(key) if isinstance(layers, dict) else {}
+        if not isinstance(layer, dict):
+            return
+        if not _level_in_chart_window(layer, chart_win_lo, chart_win_hi):
+            return
+        lo = float(layer.get("low") or 0)
+        hi = float(layer.get("high") or 0)
+        if lo <= 0 or hi <= lo:
+            return
+        mid = (lo + hi) / 2.0
+        fig.add_hrect(
+            y0=lo,
+            y1=hi,
+            line_width=1,
+            line_color=color,
+            fillcolor=fill,
+            opacity=0.18,
+            layer="below",
+            row=row,
+            col=col,
         )
-    if main_s > 0:
-        _hline(
-            main_s,
-            C["blue"],
-            "dash" if fallback_used else "solid",
-            f"{'Grafik' if fallback_used else 'Ana'} destek {main_s:.2f}",
-            width=2.6,
-        )
-    line_levels = [main_r, main_s, px]
+        if bars:
+            fig.add_annotation(
+                x=_bar_dt(float(bars[-1]["ts"])),
+                y=mid,
+                text=f"{label} {lo:.0f}-{hi:.0f}",
+                showarrow=False,
+                xanchor="left",
+                xshift=8,
+                yanchor="middle",
+                font=dict(size=9, color=color),
+                bgcolor="rgba(13,17,23,0.70)",
+                borderpad=2,
+                row=row,
+                col=col,
+            )
+        line_levels.extend([lo, hi])
+
+    # BH Pine indikatoru ile birebir: yalniz Pine L1-L6 cizgileri.
+    # Rol = SLOT paritesi (fiyat konumu degil): tek slot (1,3,5,7) = DESTEK (yesil),
+    # cift slot (2,4,6,8) = DIRENC (kirmizi). Boylece L5=destek, L6=direnc olur.
+    chart_sr = list(v3_levels.get("chart_levels") or [])
+    line_levels = [px] if px > 0 else []
+    sup_col = C["green"]
+    res_col = C["red"]
+    for cl in chart_sr:
+        cp = float(cl.get("price") or 0)
+        if cp <= 0:
+            continue
+        slot = int(cl.get("sr_slot") or 0)
+        if slot > 0:
+            is_support = (slot % 2 == 1)  # Pine: tek=destek, cift=direnc
+        else:
+            is_support = px <= 0 or cp < px
+        role_tag = "Destek" if is_support else "Direnc"
+        line_color = sup_col if is_support else res_col
+        width = float(cl.get("line_width") or 1.5)
+        ann = f"L{slot} {role_tag} {cp:.2f}" if 0 < slot <= 8 else f"{role_tag} {cp:.2f}"
+        _hline(cp, line_color, "solid", ann, width=width, sr_label=True)
+        line_levels.append(cp)
     show_tp2_chart = bool(getattr(cfg, "SEND_TP2_ORDER", False))
 
     if pos_v3:
@@ -859,21 +990,44 @@ def _add_breakout_levels(fig, row, col, bars, op=None):
             )
             line_levels.append(entry_support)
         if state.pos_entry > 0:
-            _hline(state.pos_entry, C["yellow"], "dash", f"Giris {state.pos_entry:.2f}", width=1.6)
+            _hline(
+                state.pos_entry,
+                C["purple"],
+                "dashdot",
+                f"Pozisyon Giriş {state.pos_entry:.2f}",
+                width=2.8,
+                sr_label=True,
+                label_yshift=-14,
+            )
             line_levels.append(state.pos_entry)
         if state.pos_sl > 0:
-            _hline(state.pos_sl, C["orange"], "dash", f"SL {state.pos_sl:.2f}", width=1.6)
+            _hline(
+                state.pos_sl,
+                C["orange"],
+                "dash",
+                f"Pozisyon SL {state.pos_sl:.2f}",
+                width=2.2,
+                sr_label=True,
+            )
             line_levels.append(state.pos_sl)
         if state.pos_tp1 > 0 and not state.pos_tp1_hit:
-            _hline(state.pos_tp1, C["green"], "dashdot", f"TP1 {state.pos_tp1:.2f}", width=1.4)
+            _hline(
+                state.pos_tp1,
+                C["green"],
+                "dashdot",
+                f"Pozisyon TP1 {state.pos_tp1:.2f}",
+                width=1.8,
+                sr_label=True,
+            )
             line_levels.append(state.pos_tp1)
         elif state.pos_tp1 > 0 and state.pos_tp1_hit:
             _hline(
                 state.pos_tp1,
                 C["muted"],
                 "dot",
-                f"TP1 (alindi) {state.pos_tp1:.2f}",
+                f"Pozisyon TP1 alindi {state.pos_tp1:.2f}",
                 width=1.0,
+                sr_label=True,
             )
             line_levels.append(state.pos_tp1)
         if show_tp2_chart and state.pos_tp2 > 0:
@@ -901,6 +1055,7 @@ def _add_breakout_levels(fig, row, col, bars, op=None):
     yr = _y_range_with_levels(
         bars,
         *line_levels,
+        px=px,
     )
     if yr:
         fig.update_yaxes(range=yr, tickformat=",.2f", row=row, col=col)
@@ -908,44 +1063,6 @@ def _add_breakout_levels(fig, row, col, bars, op=None):
         lo, hi = min(b["low"] for b in bars), max(b["high"] for b in bars)
         pad = max((hi - lo) * 0.04, 2.0)
         fig.update_yaxes(range=[lo - pad, hi + pad], tickformat=",.2f", row=row, col=col)
-
-    rr = float((v3_decision.get("details") or {}).get("rr", 0) or 0)
-    band_txt = f"bant {main_s:.2f} – {main_r:.2f}" if main_r > 0 and main_s > 0 else ""
-    note = f"<b>{status}</b>"
-    if band_txt:
-        note += f"<br>{band_txt}"
-    if fallback_used:
-        note += "<br>band: 15m swing fallback"
-    if pos_v3 and state.pos_tp1_hit:
-        sl_stage = str((state.position_breakout or {}).get("sl_stage", ""))
-        if sl_stage == "tp1_wait_15m":
-            note += "<br>TP1 alindi — 15m TP1 onayi bekleniyor"
-        elif sl_stage == "tp1_wait_5m":
-            note += "<br>TP1 15m onayli — 5m kapanis bekleniyor"
-        else:
-            note += "<br>TP1 alindi — runner SL trail"
-    note += f"<br>1h={s1h} (bilgi) · zone={zone} · p={range_pos:.2f}"
-    if action:
-        note += f"<br>karar={action}" + (f" · RR={rr:.2f}" if rr > 0 else "")
-    if reason:
-        note += f"<br>{reason}"
-    fig.add_annotation(
-        text=note,
-        showarrow=False,
-        xref="x domain",
-        yref="y domain",
-        x=0.01,
-        y=0.99,
-        xanchor="left",
-        yanchor="top",
-        align="left",
-        font=dict(size=9, color=C["text"]),
-        bgcolor="rgba(22,27,34,0.88)",
-        bordercolor=C["border"],
-        borderwidth=1,
-        row=row,
-        col=col,
-    )
 
 
 @app.callback(
@@ -983,12 +1100,7 @@ def update_chart(_):
         row_heights=[0.72, 0.28],
         vertical_spacing=0.08,
         horizontal_spacing=0.04,
-        subplot_titles=(
-            f"15m ({len(bars_15m)} mum, son={last_lbl} TR, kaynak={src}) — {v3_struct_line}",
-            f"1h Binance ({len(bars_1h)} mum) — 1h yapi {s1h}",
-            f"1m ({len(bars_1m)} mum)",
-            "CVD paneli (aşağı)",
-        ),
+        subplot_titles=("", "", "", ""),
         specs=[
             [{"type": "candlestick"}, {"type": "candlestick"}],
             [{"type": "candlestick"}, {"type": "scatter"}],
@@ -1039,10 +1151,6 @@ def update_chart(_):
             line_dash="dot",
             line_color=C["blue"],
             line_width=1,
-            annotation_text=f"Fiyat {px:.2f}",
-            annotation_position="left",
-            annotation_font_size=9,
-            annotation_font_color=C["blue"],
             row=1,
             col=1,
         )
@@ -1050,7 +1158,7 @@ def update_chart(_):
     fig.update_layout(
         paper_bgcolor=C["bg"], plot_bgcolor=C["bg"],
         font=dict(color=C["text"], size=10),
-        margin=dict(l=52, r=20, t=56, b=16),
+        margin=dict(l=52, r=88, t=56, b=16),
         hovermode="x unified",
         showlegend=False,
     )
@@ -1093,6 +1201,9 @@ _CLOSE_REASON_TR = {
     "market_close": "Piyasa kapanış",
     "exchange_closed": "Borsa kapattı",
     "exchange_closed_poll": "Borsa kapattı (senkron)",
+    "runner_sl": "Runner SL",
+    "runner_sl_sync": "Runner SL (senkron)",
+    "runner_closed_sync": "Runner kapandı (senkron)",
     "trend_reverse": "Trend ters",
     "cvd_reverse": "CVD ters",
     "stale_data": "Veri bayat",
@@ -1203,6 +1314,13 @@ def update_tables(_):
                     ep = state.pos_entry
             xp = float(t["exit_price"] or 0)
             reason = _format_close_reason(t["close_reason"] or "", st)
+            if (
+                st != "OPEN"
+                and bool(t["tp1_hit"])
+                and str(t["close_reason"] or "").split("|")[0].strip()
+                in ("exchange_closed", "exchange_closed_poll")
+            ):
+                reason = "Runner kapandı (senkron)"
             if sys_row and st != "OPEN":
                 reason = f"{reason} · sistem"
             if st == "OPEN":
@@ -1270,14 +1388,14 @@ def update_tables(_):
                 html.Td(reason, style={**row_td, "fontSize": "10px", "color": C["yellow"] if st == "OPEN" else C["muted"]}),
                 html.Td(sl_txt, style={**row_td, "color": C["red"] if sl_v > 0 else C["muted"]}),
                 _lvl(tp1_v, C["green"], _tp1_hit_row()),
-                _lvl(tp2_v, C["green"]),
+                _lvl(tp2_v, C["muted"]),
             ]))
         trade_widget = html.Div([
             html.Table([
                 html.Thead(html.Tr([html.Th(h, style=th_style)
                                     for h in [
                                         "Açılış", "Kapanış", "Yön", "Giriş", "Çıkış",
-                                        "PnL", "Süre", "Kapanış sebebi", "SL", "TP1", "TP2",
+                                        "PnL", "Süre", "Kapanış sebebi", "SL", "TP1", "Runner Ref",
                                     ]])),
                 html.Tbody(rows),
             ], style={"width": "100%", "borderCollapse": "collapse"}),

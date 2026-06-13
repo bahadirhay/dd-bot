@@ -62,16 +62,22 @@ def backup(mode: str = "light", dest_dir: str = "") -> str:
     src_con = sqlite3.connect(src, timeout=30.0)
 
     if mode == "full":
-        out = os.path.join(dest_dir, f"bot_full_{stamp}.db")
-        dst_con = sqlite3.connect(out)
-        with dst_con:
-            src_con.backup(dst_con)  # tutarli anlik kopya (kilitlemez)
-        dst_con.close()
-        src_con.close()
-        gz = out + ".gz"
-        with open(out, "rb") as fi, gzip.open(gz, "wb", compresslevel=6) as fo:
-            shutil.copyfileobj(fi, fo)
-        os.remove(out)
+        # Gecici 3GB .db YEREL'e yazilir (senkron klasorune degil); yalniz .gz hedefe.
+        local_tmp = os.path.join(os.path.dirname(src), "backups")
+        os.makedirs(local_tmp, exist_ok=True)
+        tmp = os.path.join(local_tmp, f"_full_tmp_{stamp}.db")
+        try:
+            dst_con = sqlite3.connect(tmp)
+            with dst_con:
+                src_con.backup(dst_con)  # tutarli anlik kopya (kilitlemez)
+            dst_con.close()
+            src_con.close()
+            gz = os.path.join(dest_dir, f"bot_full_{stamp}.db.gz")
+            with open(tmp, "rb") as fi, gzip.open(gz, "wb", compresslevel=6) as fo:
+                shutil.copyfileobj(fi, fo)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
         _prune(dest_dir, "full")
         sz = os.path.getsize(gz) / 1e6
         print(f"FULL yedek: {gz}  ({sz:.0f} MB, {time.time()-t0:.1f}s)")

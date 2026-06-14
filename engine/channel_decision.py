@@ -540,6 +540,13 @@ def decide_channel(
     r = float(levels.get("active_resistance") or 0)
     zone = str(levels.get("zone") or "MID_RANGE")
 
+    # SABIT Pine referansi (kutudan ONCE): breakout/breakdown bunlardan tespit
+    # edilir. Adaptif kutu fiyati kovaladigi icin trendde kirilim referansini
+    # yiyordu (1680->1653 dususunde breakdown hic tetiklenmedi). Fade=kutu,
+    # breakout=sabit Pine.
+    pine_levels = levels
+    pine_s, pine_r = s, r
+
     # Adaptif intraday kutu: Pine bandi genis + fiyat dar alt-aralikta konsolide
     # ise gercek kutuyu (son swing high/low) fade bandi yap. Iki kenar da
     # ulasilabilir hedeflerle oynanir (taban-LONG dahil). Veri: bot %32 alt-kenar
@@ -579,7 +586,8 @@ def decide_channel(
         cvd=cvd,
     )
 
-    breakout_side = detect_breakout_5m(s, r, price)
+    # Breakout/breakdown: SABIT Pine bandindan (kutu degil) — trendde kaymaz.
+    breakout_side = detect_breakout_5m(pine_s, pine_r, price)
     path = "none"
     candidate = ""
 
@@ -748,9 +756,11 @@ def decide_channel(
                 "direction_scores": scores,
             }
 
+    # Breakout SABIT Pine geometrisiyle (kutu degil); fade kutu kenarlariyla.
+    entry_levels = pine_levels if path == "breakout" else levels
     entry = _build_entry(
         candidate,
-        levels,
+        entry_levels,
         price,
         f"CHANNEL_{path.upper()}_{candidate}",
     )

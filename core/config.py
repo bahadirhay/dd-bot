@@ -752,6 +752,10 @@ class Config:
     # OI/squeeze filtresi: breakout'ta OI belirgin dusuyorsa (squeeze/unwind) girme.
     V3_OI_BREAKOUT_CONFIRM = os.getenv("V3_OI_BREAKOUT_CONFIRM", "true").lower() in ("1", "true", "yes")
     V3_OI_SQUEEZE_DROP_PCT = float(os.getenv("V3_OI_SQUEEZE_DROP_PCT", "0.05"))
+    # Seviyede guclu akis-donusu (absorpsiyon) -> counter-trend vetolari (trend
+    # filtresi, VR-trend, yapi-hizasi) asar. "Destekten dirence buy" geri gelir.
+    V3_REVERSAL_OVERRIDE_ENABLED = os.getenv("V3_REVERSAL_OVERRIDE_ENABLED", "true").lower() in ("1", "true", "yes")
+    V3_REVERSAL_FLOW_RATIO = float(os.getenv("V3_REVERSAL_FLOW_RATIO", "0.60"))
     # (a) Borsa SL'sini felaket tavani mesafesine genislet (gurultu otesi). Boyut
     # risk-bazli kuculur; genis SL ile RR yeniden dogrulanir (sub-min-RR dusulur).
     V3_WIDEN_SL_TO_CAP = os.getenv("V3_WIDEN_SL_TO_CAP", "false").lower() in ("1", "true", "yes")

@@ -261,6 +261,24 @@ def cvd_fade_filter(side: str, cvd: dict) -> tuple[bool, str, float]:
     return True, "CVD OK", 0.0
 
 
+def _strong_flow_reversal(candidate: str, cvd: dict) -> bool:
+    """
+    Seviyede GUCLU akis-donusu (absorpsiyon): satis emilip alim devraldi (destekte)
+    ya da tersi (direncte). Bu, donusun KANITI -> counter-trend vetolarini (trend
+    filtresi, VR-trend, yapi-hizasi) asar. Veri: 1653 dibinde taker 0.70 / cvd
+    +9929 ile alim dondu ama struct-align long'u bloklamisti.
+    """
+    if not bool(getattr(cfg, "V3_REVERSAL_OVERRIDE_ENABLED", True)):
+        return False
+    br = float(cvd.get("buy_ratio", 0.5) or 0.5)
+    cum = float(cvd.get("cumulative", 0) or 0)
+    direction = str(cvd.get("direction") or "").upper()
+    rr = float(getattr(cfg, "V3_REVERSAL_FLOW_RATIO", 0.60) or 0.60)
+    if candidate == "LONG":
+        return br >= rr and (cum > 0 or direction == "BULL")
+    return br <= (1.0 - rr) and (cum < 0 or direction == "BEAR")
+
+
 def oi_breakout_ok(side: str) -> tuple[bool, str]:
     """
     OI/squeeze filtresi (saf hesap, indikator yok). Gercek breakout'ta yeni para
@@ -632,9 +650,14 @@ def decide_channel(
                 "direction_scores": scores,
             }
 
+        # Guclu akis-donusu (absorpsiyon) -> counter-trend vetolari asar
+        reversal = _strong_flow_reversal(candidate, cvd)
+        if reversal:
+            reasons.append("guclu akis-donusu (absorpsiyon) — counter-trend veto asildi")
+
         # Trend filtresi: GUCLU ters trendde fade yapma (direnci yukselen trendde
         # shortlamak = momentuma karsi, kayip kaynagi). 15m guc esigi.
-        if bool(getattr(cfg, "V3_CHANNEL_FADE_TREND_FILTER", True)):
+        if bool(getattr(cfg, "V3_CHANNEL_FADE_TREND_FILTER", True)) and not reversal:
             tv = getattr(state, "trend_view", None) or {}
             tbias = str(tv.get("bias") or "").upper()
             tstr = float(tv.get("strength") or 0)
@@ -668,7 +691,7 @@ def decide_channel(
                 return {"final_decision": "WAIT", "reason": msg, "reasons": reasons,
                         "path": path, "zone": zone, "direction_scores": scores}
             reg = classify_regime()
-            if reg.get("regime") == "trend":
+            if reg.get("regime") == "trend" and not reversal:
                 msg = f"VR trend rejimi (vr={reg['vr']}) — fade yok"
                 reasons.append(msg)
                 return {"final_decision": "WAIT", "reason": msg, "reasons": reasons,
@@ -684,7 +707,7 @@ def decide_channel(
             sL = float(scores.get("structure_long_score") or 0)
             sS = float(scores.get("structure_short_score") or 0)
             opp_lead = (sS - sL) if candidate == "LONG" else (sL - sS)
-            if opp_lead >= gap_min:
+            if opp_lead >= gap_min and not reversal:
                 msg = f"yapi ters baskin (karsi-yon +{opp_lead:.0f}) — fade {candidate} yok"
                 reasons.append(msg)
                 return {

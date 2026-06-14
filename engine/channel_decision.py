@@ -455,6 +455,37 @@ def _details_from_entry(
     }
 
 
+_box_log_state: dict = {"sig": "", "ts": 0.0}
+
+
+def _maybe_log_box(price: float, box: dict, s: float, r: float, zone: str, used: bool) -> None:
+    """Kutu kararini DB'ye yaz — yalniz durum degisince (spam yok)."""
+    import time as _t
+
+    sig = f"{used}|{round(s,1)}|{round(r,1)}|{zone}"
+    now = _t.time()
+    if sig == _box_log_state["sig"] and (now - _box_log_state["ts"]) < 900:
+        return
+    _box_log_state["sig"] = sig
+    _box_log_state["ts"] = now
+    try:
+        from botlog.db import log_box_decision
+
+        log_box_decision({
+            "ts": now, "price": price,
+            "pine_s": float(box.get("pine_s") or 0),
+            "pine_r": float(box.get("pine_r") or 0),
+            "box_s": float(box.get("box_s") or 0),
+            "box_r": float(box.get("box_r") or 0),
+            "used": 1 if used else 0, "zone": zone,
+            "reason": str(box.get("reason") or ""),
+        })
+        if used:
+            log.info(f"[BOX] aktif kutu kullanildi S={s:.2f} R={r:.2f} zone={zone} px={price:.2f}")
+    except Exception:
+        pass
+
+
 def decide_channel(
     *,
     levels: dict,
@@ -467,6 +498,27 @@ def decide_channel(
     s = float(levels.get("active_support") or 0)
     r = float(levels.get("active_resistance") or 0)
     zone = str(levels.get("zone") or "MID_RANGE")
+
+    # Adaptif intraday kutu: Pine bandi genis + fiyat dar alt-aralikta konsolide
+    # ise gercek kutuyu (son swing high/low) fade bandi yap. Iki kenar da
+    # ulasilabilir hedeflerle oynanir (taban-LONG dahil). Veri: bot %32 alt-kenar
+    # fırsatini kaciriyordu cunku destegi uzak Pine seviyesinde saniyordu.
+    try:
+        from engine.intraday_box import compute_intraday_box
+
+        box = compute_intraday_box(price, s, r)
+        if box.get("valid") and box["box_r"] > box["box_s"] > 0:
+            from engine.v3_common import calculate_channel_zone
+
+            s, r = box["box_s"], box["box_r"]
+            zone = calculate_channel_zone(price, s, r)
+            levels = {**levels, "active_support": s, "active_resistance": r,
+                      "zone": zone}
+            _maybe_log_box(price, box, s, r, zone, True)
+        else:
+            _maybe_log_box(price, box, s, r, zone, False)
+    except Exception:
+        pass
 
     if s <= 0 or r <= s:
         return {

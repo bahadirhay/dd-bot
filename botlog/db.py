@@ -52,6 +52,51 @@ def _migrate_trades_learning_columns(db: sqlite3.Connection) -> None:
             db.execute(f"ALTER TABLE trades ADD COLUMN {name} {typ}")
 
 
+def _migrate_box_log(db: sqlite3.Connection) -> None:
+    """Adaptif kutu kararlarini kaydeden tablo (her adim izlenebilsin)."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS box_log (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts        REAL NOT NULL,
+            ts_human  TEXT,
+            price     REAL,
+            pine_s    REAL,
+            pine_r    REAL,
+            box_s     REAL,
+            box_r     REAL,
+            used      INTEGER DEFAULT 0,
+            zone      TEXT,
+            reason    TEXT
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_box_log_ts ON box_log(ts DESC)")
+
+
+def log_box_decision(data: dict) -> None:
+    """Kutu kararini kaydet (yalniz degisiklik/kullanim aninda cagrilmali)."""
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            db.execute(
+                "INSERT INTO box_log (ts,ts_human,price,pine_s,pine_r,box_s,box_r,used,zone,reason) "
+                "VALUES (:ts,:ts_human,:price,:pine_s,:pine_r,:box_s,:box_r,:used,:zone,:reason)",
+                {
+                    "ts": data.get("ts") or 0.0,
+                    "ts_human": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                    "price": data.get("price") or 0.0,
+                    "pine_s": data.get("pine_s") or 0.0,
+                    "pine_r": data.get("pine_r") or 0.0,
+                    "box_s": data.get("box_s") or 0.0,
+                    "box_r": data.get("box_r") or 0.0,
+                    "used": int(data.get("used") or 0),
+                    "zone": str(data.get("zone") or ""),
+                    "reason": str(data.get("reason") or ""),
+                },
+            )
+    except Exception:
+        pass
+
+
 def init():
     with _conn() as db:
         db.executescript("""
@@ -219,6 +264,7 @@ def init():
         """)
         _migrate_v3_attribution_columns(db)
         _migrate_trades_learning_columns(db)
+        _migrate_box_log(db)
     print("DB hazır:", cfg.DB_PATH)
     try:
         n = backfill_closed_trade_metrics()

@@ -45,6 +45,17 @@ def compute_intraday_box(
     if box_r <= box_s or box_s <= 0:
         return out
 
+    # Kutu kenarini GERCEK Pine yatay seviyesiyle hizala: spike-high'i direnc
+    # sanma. Fiyatin altinda/ustunde aktif Pine seviyesi varsa kutu kenari onu
+    # asmasin (06-14: ham tavan 1690 spike iken gercek direnc L6=1682.6; fiyat
+    # 1681'de orada tepki veriyordu — clamp ile NEAR_RESISTANCE -> fade short).
+    if pine_r and px < pine_r < box_r:
+        box_r = float(pine_r)
+    if pine_s and box_s < pine_s < px:
+        box_s = float(pine_s)
+    if box_r <= box_s:
+        return out
+
     width_bps = (box_r - box_s) / px * 1e4
     min_w = float(getattr(cfg, "V3_BOX_MIN_WIDTH_BPS", 40) or 40)
     max_w = float(getattr(cfg, "V3_BOX_MAX_WIDTH_BPS", 220) or 220)

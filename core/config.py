@@ -756,6 +756,8 @@ class Config:
     # filtresi, VR-trend, yapi-hizasi) asar. "Destekten dirence buy" geri gelir.
     V3_REVERSAL_OVERRIDE_ENABLED = os.getenv("V3_REVERSAL_OVERRIDE_ENABLED", "true").lower() in ("1", "true", "yes")
     V3_REVERSAL_FLOW_RATIO = float(os.getenv("V3_REVERSAL_FLOW_RATIO", "0.60"))
+    # Breakout girisi: SL kirilan seviyede; TP2 = risk x bu (ride). Runner gerisini surer.
+    V3_BREAKOUT_TP2_RR = float(os.getenv("V3_BREAKOUT_TP2_RR", "3.0"))
     # (a) Borsa SL'sini felaket tavani mesafesine genislet (gurultu otesi). Boyut
     # risk-bazli kuculur; genis SL ile RR yeniden dogrulanir (sub-min-RR dusulur).
     V3_WIDEN_SL_TO_CAP = os.getenv("V3_WIDEN_SL_TO_CAP", "false").lower() in ("1", "true", "yes")

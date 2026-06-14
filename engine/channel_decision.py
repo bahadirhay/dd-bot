@@ -756,14 +756,20 @@ def decide_channel(
                 "direction_scores": scores,
             }
 
-    # Breakout SABIT Pine geometrisiyle (kutu degil); fade kutu kenarlariyla.
-    entry_levels = pine_levels if path == "breakout" else levels
-    entry = _build_entry(
-        candidate,
-        entry_levels,
-        price,
-        f"CHANNEL_{path.upper()}_{candidate}",
-    )
+    # Breakout: KIRILAN seviye SL'li ozel geometri (retest stop). Fade: kutu kenari.
+    if path == "breakout":
+        from engine.entry_v3 import _build_breakout_entry
+
+        broken = pine_s if candidate == "SHORT" else pine_r
+        entry = _build_breakout_entry(
+            "SELL" if candidate == "SHORT" else "BUY",
+            price, broken,
+            entry_type=f"CHANNEL_BREAKOUT_{candidate}",
+        )
+    else:
+        entry = _build_entry(
+            candidate, levels, price, f"CHANNEL_FADE_{candidate}",
+        )
     rr = float(entry.get("rr", 0) or 0)
     min_rr = float(getattr(cfg, "V3_MIN_RR_RATIO", 2.0) or 2.0)
     if not entry.get("valid") or rr < min_rr:

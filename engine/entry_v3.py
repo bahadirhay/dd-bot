@@ -289,6 +289,52 @@ def _calc_range_buy(entry: float, support: float, resistance: float) -> dict | N
     }
 
 
+def _build_breakout_entry(
+    direction: str,
+    entry: float,
+    broken_level: float,
+    *,
+    entry_type: str = "CHANNEL_BREAKOUT",
+) -> dict:
+    """
+    Breakout/breakdown girisi — SL KIRILAN seviyede (retest stop), karsi ekstremada
+    DEGIL. Fade geometrisi SL'yi uzak direnc/destege koyup RR<2 -> red yapiyordu
+    (1670 breakdown: SL=1688 RR=0.69). Dogrusu: SL=kirilan seviye+buffer (kucuk
+    risk), TP2 = risk x mult (ride), TP1 ulasilabilir cap. Runner gerisini surer.
+    """
+    if entry <= 0 or broken_level <= 0:
+        return _invalid()
+    buf = entry * sl_buffer_bps(entry) / 10000.0
+    tp2_rr = float(getattr(cfg, "V3_BREAKOUT_TP2_RR", 3.0) or 3.0)
+    tp1_cap = entry * float(getattr(cfg, "V3_TP1_MAX_BPS", 60) or 60) / 1e4
+    direction = direction.upper()
+    if direction == "SELL":  # breakdown — kirilan destek ustu SL
+        sl = broken_level + buf
+        risk = max(sl - entry, entry * 0.0005)
+        tp1 = entry - min(risk * 1.5, tp1_cap)
+        tp2 = entry - risk * tp2_rr
+        if not (tp2 < tp1 < entry < sl):
+            return _invalid()
+        rr = (entry - tp2) / risk
+    else:  # BUY breakout — kirilan direnc alti SL
+        sl = broken_level - buf
+        risk = max(entry - sl, entry * 0.0005)
+        tp1 = entry + min(risk * 1.5, tp1_cap)
+        tp2 = entry + risk * tp2_rr
+        if not (sl < entry < tp1 < tp2):
+            return _invalid()
+        rr = (tp2 - entry) / risk
+    return {
+        "valid": rr >= cfg.V3_MIN_RR_RATIO,
+        "direction": "BUY" if direction == "BUY" else "SELL",
+        "entry_type": entry_type,
+        "price": entry, "sl": round(sl, 2), "tp1": round(tp1, 2),
+        "tp2": round(tp2, 2), "rr": round(rr, 2),
+        "sl_source": "breakout_level", "sl_anchor": round(broken_level, 2),
+        "preview": False,
+    }
+
+
 def _build_range_entry(
     direction: str,
     entry: float,

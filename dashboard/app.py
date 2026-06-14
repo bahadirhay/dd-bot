@@ -596,13 +596,20 @@ def update_fast(_):
     v3_pos = float(v3_levels.get("range_position", 0.5) or 0.5)
     v3_1h = str(((v3_structure.get("1h") or {}).get("direction")) or "?")
     zone = str(v3_levels.get("zone") or "MID_RANGE")
+    # Adaptif kutu kullaniliyorsa GERCEK bandi goster (Pine'in genis/uzak bandi degil)
+    _box = getattr(state, "v3_box", None) or {}
+    box_note = ""
+    if _box.get("used") and float(_box.get("r") or 0) > float(_box.get("s") or 0) > 0:
+        v3_s = float(_box["s"]); v3_r = float(_box["r"])
+        zone = str(_box.get("zone") or zone)
+        box_note = " (kutu)"
     band_txt = _active_band_text(price, v3_s, v3_r)
     macro_txt = (
         _active_band_text(price, v3_macro_s, v3_macro_r)
         if v3_levels.get("trade_band") and v3_macro_r > v3_macro_s > 0
         else ""
     )
-    band_display = f"trade={band_txt}" + (f" macro={macro_txt}" if macro_txt else "")
+    band_display = f"trade={band_txt}{box_note}" + (f" macro={macro_txt}" if macro_txt else "")
     regime_sub = f"zone={zone} | {band_display} | 1h={v3_1h} | p={v3_pos:.2f}"
     v3_mode = bool(getattr(cfg, "STRATEGY_V3_ENABLED", False))
     if v3_mode and (v3_r > 0 or v3_s > 0 or v3_scn):

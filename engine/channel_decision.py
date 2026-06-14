@@ -514,8 +514,10 @@ def decide_channel(
             zone = calculate_channel_zone(price, s, r)
             levels = {**levels, "active_support": s, "active_resistance": r,
                       "zone": zone}
+            state.v3_box = {"used": True, "s": s, "r": r, "zone": zone}
             _maybe_log_box(price, box, s, r, zone, True)
         else:
+            state.v3_box = {"used": False, "s": 0.0, "r": 0.0, "zone": zone}
             _maybe_log_box(price, box, s, r, zone, False)
     except Exception:
         pass

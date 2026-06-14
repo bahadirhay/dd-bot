@@ -261,6 +261,29 @@ def cvd_fade_filter(side: str, cvd: dict) -> tuple[bool, str, float]:
     return True, "CVD OK", 0.0
 
 
+def oi_breakout_ok(side: str) -> tuple[bool, str]:
+    """
+    OI/squeeze filtresi (saf hesap, indikator yok). Gercek breakout'ta yeni para
+    girer -> OI artar. OI belirgin DUSUYORsa hareket pozisyon kapanisindan
+    (squeeze/unwind) kaynaklidir -> sahte kirilim. Donus: (allow, note).
+    """
+    if not bool(getattr(cfg, "V3_OI_BREAKOUT_CONFIRM", True)):
+        return True, "oi filtresi kapali"
+    hist = list(getattr(state, "oi_history", None) or [])
+    n = int(getattr(cfg, "OI_LOOKBACK", 3) or 3)
+    if len(hist) < max(2, n):
+        return True, "oi veri yetersiz"
+    old = float(hist[-n].get("oi", 0) or 0)
+    cur = float(hist[-1].get("oi", 0) or 0)
+    if old <= 0:
+        return True, "oi yok"
+    chg = (cur - old) / old * 100.0
+    drop = float(getattr(cfg, "V3_OI_SQUEEZE_DROP_PCT", 0.05) or 0.05)
+    if chg <= -drop:
+        return False, f"OI dusuyor (%{chg:.2f}) — squeeze/unwind, gercek breakout degil"
+    return True, f"OI teyit (%{chg:+.2f})"
+
+
 def cvd_breakout_supports(side: str, cvd: dict) -> tuple[bool, str]:
     """Breakout: CVD destekleyici veya notr; asiri ters veto."""
     side = side.upper()
@@ -552,6 +575,20 @@ def decide_channel(
                 "final_decision": "WAIT",
                 "reason": cvd_note,
                 "reasons": reasons + [cvd_note],
+                "path": path,
+                "zone": zone,
+                "direction_scores": scores,
+            }
+        # OI/squeeze filtresi: gercek breakout'ta yeni para girer (OI artar). OI
+        # DUSUYORsa = pozisyon kapanisi (squeeze/unwind) -> sahte kirilim, girme.
+        # (1698 spike: OI surekli dusuyordu = short-covering, gercek degil.)
+        ok_oi, oi_note = oi_breakout_ok(candidate)
+        reasons.append(oi_note)
+        if not ok_oi:
+            return {
+                "final_decision": "WAIT",
+                "reason": oi_note,
+                "reasons": reasons,
                 "path": path,
                 "zone": zone,
                 "direction_scores": scores,

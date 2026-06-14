@@ -749,6 +749,9 @@ class Config:
     V3_VR_K = int(os.getenv("V3_VR_K", "5"))
     V3_VR_MEANREVERT_MAX = float(os.getenv("V3_VR_MEANREVERT_MAX", "0.80"))
     V3_VR_TREND_MIN = float(os.getenv("V3_VR_TREND_MIN", "1.20"))
+    # OI/squeeze filtresi: breakout'ta OI belirgin dusuyorsa (squeeze/unwind) girme.
+    V3_OI_BREAKOUT_CONFIRM = os.getenv("V3_OI_BREAKOUT_CONFIRM", "true").lower() in ("1", "true", "yes")
+    V3_OI_SQUEEZE_DROP_PCT = float(os.getenv("V3_OI_SQUEEZE_DROP_PCT", "0.05"))
     # (a) Borsa SL'sini felaket tavani mesafesine genislet (gurultu otesi). Boyut
     # risk-bazli kuculur; genis SL ile RR yeniden dogrulanir (sub-min-RR dusulur).
     V3_WIDEN_SL_TO_CAP = os.getenv("V3_WIDEN_SL_TO_CAP", "false").lower() in ("1", "true", "yes")

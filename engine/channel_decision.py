@@ -616,6 +616,29 @@ def decide_channel(
                     "direction_scores": scores,
                 }
 
+        # EDGE KAPISI (veriyle dogrulandi): son realized range hedefi (TP1)
+        # karsilamiyorsa fade yok — ulasilmaz hedef, kar beklentisi yok. Ayrica
+        # VR rejimi 'trend' ise fade yapma (trend'e karsi fade = kayip kaynagi).
+        try:
+            from engine.regime_vr import edge_gate, classify_regime
+
+            ref_tp1 = float(getattr(cfg, "V3_TP1_MAX_BPS", 60) or 60)
+            eg = edge_gate(price, ref_tp1)
+            if not eg["allow"]:
+                msg = (f"edge yok: son range {eg['range_bps']:.0f}bps < hedef "
+                       f"{eg['need_bps']:.0f}bps (ulasilmaz)")
+                reasons.append(msg)
+                return {"final_decision": "WAIT", "reason": msg, "reasons": reasons,
+                        "path": path, "zone": zone, "direction_scores": scores}
+            reg = classify_regime()
+            if reg.get("regime") == "trend":
+                msg = f"VR trend rejimi (vr={reg['vr']}) — fade yok"
+                reasons.append(msg)
+                return {"final_decision": "WAIT", "reason": msg, "reasons": reasons,
+                        "path": path, "zone": zone, "direction_scores": scores}
+        except Exception:
+            pass
+
         # Yapi-hizasi kapisi: yapi sert TERS yondeyse o yone fade yapma.
         # Veri: 100 LONG %19 kazandi (ayi yapida destek-long = counter-trend bleed).
         # Trend filtresi sadece guc>=80'i yakaliyor; bu kapi skor farkini yakalar.

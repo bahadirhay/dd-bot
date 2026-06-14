@@ -739,6 +739,16 @@ class Config:
     V3_BOX_MIN_WIDTH_BPS = float(os.getenv("V3_BOX_MIN_WIDTH_BPS", "40"))
     V3_BOX_MAX_WIDTH_BPS = float(os.getenv("V3_BOX_MAX_WIDTH_BPS", "220"))
     V3_BOX_PINE_FAR_MULT = float(os.getenv("V3_BOX_PINE_FAR_MULT", "1.5"))
+    # Edge kapisi (veriyle dogrulandi): son realized range, hedef (TP1) mesafesini
+    # karsilamiyorsa fade yok. Kaybin %90'i 'range<TP1' islemlerindeydi.
+    V3_EDGE_GATE_ENABLED = os.getenv("V3_EDGE_GATE_ENABLED", "true").lower() in ("1", "true", "yes")
+    V3_EDGE_RANGE_WINDOW_BARS = int(os.getenv("V3_EDGE_RANGE_WINDOW_BARS", "120"))  # 2h
+    V3_EDGE_RANGE_MULT = float(os.getenv("V3_EDGE_RANGE_MULT", "1.0"))
+    # Variance ratio rejim (yardimci): trend'e fade yapma.
+    V3_VR_WINDOW_BARS = int(os.getenv("V3_VR_WINDOW_BARS", "120"))
+    V3_VR_K = int(os.getenv("V3_VR_K", "5"))
+    V3_VR_MEANREVERT_MAX = float(os.getenv("V3_VR_MEANREVERT_MAX", "0.80"))
+    V3_VR_TREND_MIN = float(os.getenv("V3_VR_TREND_MIN", "1.20"))
     # (a) Borsa SL'sini felaket tavani mesafesine genislet (gurultu otesi). Boyut
     # risk-bazli kuculur; genis SL ile RR yeniden dogrulanir (sub-min-RR dusulur).
     V3_WIDEN_SL_TO_CAP = os.getenv("V3_WIDEN_SL_TO_CAP", "false").lower() in ("1", "true", "yes")

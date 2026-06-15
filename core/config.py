@@ -743,7 +743,10 @@ class Config:
     # karsilamiyorsa fade yok. Kaybin %90'i 'range<TP1' islemlerindeydi.
     V3_EDGE_GATE_ENABLED = os.getenv("V3_EDGE_GATE_ENABLED", "true").lower() in ("1", "true", "yes")
     V3_EDGE_RANGE_WINDOW_BARS = int(os.getenv("V3_EDGE_RANGE_WINDOW_BARS", "120"))  # 2h
-    V3_EDGE_RANGE_MULT = float(os.getenv("V3_EDGE_RANGE_MULT", "1.0"))
+    # 1.0 cok kirilgandi (range 59 < hedef 60 -> 1bps farkla blok, kanal-ici
+    # hareketleri kaciriyordu). 0.8: eski chop-bleed (range~36<48) hala bloklu,
+    # saglikli aralik (range~59>=48) gecer. Veriyle dogrulandi.
+    V3_EDGE_RANGE_MULT = float(os.getenv("V3_EDGE_RANGE_MULT", "0.8"))
     # Variance ratio rejim (yardimci): trend'e fade yapma.
     V3_VR_WINDOW_BARS = int(os.getenv("V3_VR_WINDOW_BARS", "120"))
     V3_VR_K = int(os.getenv("V3_VR_K", "5"))

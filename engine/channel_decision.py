@@ -721,7 +721,12 @@ def decide_channel(
             sL = float(scores.get("structure_long_score") or 0)
             sS = float(scores.get("structure_short_score") or 0)
             opp_lead = (sS - sL) if candidate == "LONG" else (sL - sS)
-            if opp_lead >= gap_min and not reversal:
+            # NOT: reversal override artik struct-align'i BYPASS ETMEZ. Cok-zamanli
+            # yapi sert tersse (gap>=30) o yone fade YOK — anlik akis donusu bunu
+            # asamaz. Yoksa yukselen trendde dirence "satis var" diye 8 ardisik
+            # short aciliyor (06-15 1759->1825 felaketi). Override yalniz kisa-vade
+            # momentum kapilarini (trend-filtre/VR) asar.
+            if opp_lead >= gap_min:
                 msg = f"yapi ters baskin (karsi-yon +{opp_lead:.0f}) — fade {candidate} yok"
                 reasons.append(msg)
                 return {

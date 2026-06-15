@@ -704,6 +704,29 @@ def decide_channel(
                 "direction_scores": scores,
             }
 
+        # BLUE-SKY vetosu (HARD, fiyat-bazli — etikete bagli degil): fiyat TUM gercek
+        # seviyelerin belirgin USTUNDEyse short YOK (altindaysa long YOK). Sentetik
+        # yakin-direnci fade etmeyi onler. #201: px 1813, en yuksek seviye 1730 ->
+        # short absurd (475bps blue sky). En saglam counter-trend korumasi.
+        try:
+            _merged = pine_levels.get("all_levels") or levels.get("all_levels") or []
+            _allpx = [float(l.get("price", 0) or 0) for l in _merged
+                      if float(l.get("price", 0) or 0) > 0]
+            _marg = price * 0.0015
+            if _allpx:
+                if candidate == "SHORT" and price > max(_allpx) + _marg:
+                    msg = f"blue-sky: fiyat tum seviyelerin ustunde (max {max(_allpx):.0f}) — short yok"
+                    reasons.append(msg)
+                    return {"final_decision": "WAIT", "reason": msg, "reasons": reasons,
+                            "path": path, "zone": zone, "direction_scores": scores}
+                if candidate == "LONG" and price < min(_allpx) - _marg:
+                    msg = f"blue-sky: fiyat tum seviyelerin altinda (min {min(_allpx):.0f}) — long yok"
+                    reasons.append(msg)
+                    return {"final_decision": "WAIT", "reason": msg, "reasons": reasons,
+                            "path": path, "zone": zone, "direction_scores": scores}
+        except Exception:
+            pass
+
         # CIFT-ZAMANLI trend vetosu (HARD): 15m VE 1h ayni yonde ise o yone fade YOK
         # — gap esiginden ve akis-donusundan bagimsiz. #200 (UP/UP'ta pullback-short,
         # gap 13.8<30 sizdi) gibi counter-trend felaketleri onler.

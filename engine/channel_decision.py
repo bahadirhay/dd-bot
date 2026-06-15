@@ -261,6 +261,43 @@ def cvd_fade_filter(side: str, cvd: dict) -> tuple[bool, str, float]:
     return True, "CVD OK", 0.0
 
 
+def _trend_continuation(price: float, structure: dict, cvd: dict) -> tuple[str, float, str]:
+    """
+    Trend-devam girisi (blue-sky/yeni-tepe): fiyat son swing-high'i kirar + yapi
+    AYNI yonde (fractal/trend) + OI yukseliyor (yeni para) -> trend yonunde gir,
+    ride. Fade DEGIL — trendle AYNI yon (override felaketinin tersi). Donus:
+    (side, kirilan_seviye, not).
+    Veri (06-15): 1724'te swing-high 1722.8 kirildi + 15m UP + OI -> +%4.96 ride.
+    """
+    none = ("", 0.0, "")
+    if not bool(getattr(cfg, "V3_TREND_CONT_ENABLED", True)) or price <= 0:
+        return none
+    from engine.v3_common import bars_15m
+
+    n = int(getattr(cfg, "V3_TREND_CONT_SWING_BARS", 12) or 12)
+    bars = bars_15m(n + 3)
+    if len(bars) < n + 1:
+        return none
+    win = bars[-(n + 1):-1]  # son n kapali bar
+    sh = max(float(b.get("high", 0) or 0) for b in win)
+    sl = min(float(b.get("low", 0) or 1e12) for b in win)
+
+    fr = structure.get("fractal") or {}
+    trend = str(structure.get("trend") or "")
+    up = trend == "bullish" or (fr.get("aligned") and str(fr.get("alignment")) == "bullish")
+    dn = trend == "bearish" or (fr.get("aligned") and str(fr.get("alignment")) == "bearish")
+
+    ok_oi, _ = oi_breakout_ok("LONG")  # OI dusuyorsa (squeeze) gecmez
+    if not ok_oi:
+        return none
+
+    if price > sh and up:
+        return ("LONG", sh, f"trend-devam: yeni tepe {sh:.1f} kirildi + UP + OI")
+    if price < sl and dn:
+        return ("SHORT", sl, f"trend-devam: yeni dip {sl:.1f} kirildi + DOWN + OI")
+    return none
+
+
 def _strong_flow_reversal(candidate: str, cvd: dict) -> bool:
     """
     Seviyede GUCLU akis-donusu (absorpsiyon): satis emilip alim devraldi (destekte)
@@ -588,6 +625,15 @@ def decide_channel(
 
     # Breakout/breakdown: SABIT Pine bandindan (kutu degil) — trendde kaymaz.
     breakout_side = detect_breakout_5m(pine_s, pine_r, price)
+    tc_level = 0.0
+    # Pine kirilim yoksa TREND-DEVAM (blue-sky/yeni-tepe): fiyat tum seviyelerin
+    # ustunde/altinda, yeni swing kirar + yapi ayni yon + OI -> trend yonunde gir.
+    if not breakout_side:
+        tc_side, tc_lvl, tc_note = _trend_continuation(price, structure, cvd)
+        if tc_side:
+            breakout_side = tc_side
+            tc_level = tc_lvl
+            reasons.append(tc_note)
     path = "none"
     candidate = ""
 
@@ -657,6 +703,19 @@ def decide_channel(
                 "zone": zone,
                 "direction_scores": scores,
             }
+
+        # CIFT-ZAMANLI trend vetosu (HARD): 15m VE 1h ayni yonde ise o yone fade YOK
+        # — gap esiginden ve akis-donusundan bagimsiz. #200 (UP/UP'ta pullback-short,
+        # gap 13.8<30 sizdi) gibi counter-trend felaketleri onler.
+        t15 = str(structure.get("trend") or "")
+        d1h = str(structure.get("dir_1h") or "")
+        both_up = t15 == "bullish" and d1h == "UP"
+        both_dn = t15 == "bearish" and d1h == "DOWN"
+        if (candidate == "SHORT" and both_up) or (candidate == "LONG" and both_dn):
+            msg = f"cift-zamanli trend (15m={t15}/1h={d1h}) — ters fade {candidate} yok"
+            reasons.append(msg)
+            return {"final_decision": "WAIT", "reason": msg, "reasons": reasons,
+                    "path": path, "zone": zone, "direction_scores": scores}
 
         # Guclu akis-donusu (absorpsiyon) -> counter-trend vetolari asar
         reversal = _strong_flow_reversal(candidate, cvd)
@@ -771,7 +830,7 @@ def decide_channel(
     if path == "breakout":
         from engine.entry_v3 import _build_breakout_entry
 
-        broken = pine_s if candidate == "SHORT" else pine_r
+        broken = tc_level if tc_level > 0 else (pine_s if candidate == "SHORT" else pine_r)
         entry = _build_breakout_entry(
             "SELL" if candidate == "SHORT" else "BUY",
             price, broken,

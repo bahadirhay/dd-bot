@@ -764,6 +764,10 @@ class Config:
     # Edge hedefi kanaldan tureit: ref_TP1 = kanal_genisligi x bu (tavan TP1_MAX).
     # Sabit-bps kirilganligini kaldirir; dar/genis kanala otomatik uyum.
     V3_TP1_FRAC_OF_BAND = float(os.getenv("V3_TP1_FRAC_OF_BAND", "0.6"))
+    # Trend-devam girisi: blue-sky'da yeni swing-high/low kirilir + yapi ayni yon +
+    # OI yukseliyorsa trend yonunde gir (kacan trendi yakala). Veriyle dogrulandi.
+    V3_TREND_CONT_ENABLED = os.getenv("V3_TREND_CONT_ENABLED", "true").lower() in ("1", "true", "yes")
+    V3_TREND_CONT_SWING_BARS = int(os.getenv("V3_TREND_CONT_SWING_BARS", "12"))
     # (a) Borsa SL'sini felaket tavani mesafesine genislet (gurultu otesi). Boyut
     # risk-bazli kuculur; genis SL ile RR yeniden dogrulanir (sub-min-RR dusulur).
     V3_WIDEN_SL_TO_CAP = os.getenv("V3_WIDEN_SL_TO_CAP", "false").lower() in ("1", "true", "yes")

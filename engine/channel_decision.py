@@ -282,10 +282,12 @@ def _trend_continuation(price: float, structure: dict, cvd: dict) -> tuple[str, 
     sh = max(float(b.get("high", 0) or 0) for b in win)
     sl = min(float(b.get("low", 0) or 1e12) for b in win)
 
-    fr = structure.get("fractal") or {}
-    trend = str(structure.get("trend") or "")
-    up = trend == "bullish" or (fr.get("aligned") and str(fr.get("alignment")) == "bullish")
-    dn = trend == "bearish" or (fr.get("aligned") and str(fr.get("alignment")) == "bearish")
+    # GUVENILIR kaynak: state.structure_15m ("UP"/"DOWN"). structure dict'inde
+    # 'trend'/'fractal' YOK (get_structure_snapshot 1h/alignment/effective_bias
+    # donduruyor) — onlari okumak no-op'tu, trend-devam hic tetiklenmiyordu.
+    st15 = str(getattr(state, "structure_15m", "") or "").upper()
+    up = st15 == "UP"
+    dn = st15 == "DOWN"
 
     ok_oi, _ = oi_breakout_ok("LONG")  # OI dusuyorsa (squeeze) gecmez
     if not ok_oi:
@@ -739,10 +741,13 @@ def decide_channel(
         # CIFT-ZAMANLI trend vetosu (HARD): 15m VE 1h ayni yonde ise o yone fade YOK
         # — gap esiginden ve akis-donusundan bagimsiz. #200 (UP/UP'ta pullback-short,
         # gap 13.8<30 sizdi) gibi counter-trend felaketleri onler.
-        t15 = str(structure.get("trend") or "")
-        d1h = str(structure.get("dir_1h") or "")
-        both_up = t15 == "bullish" and d1h == "UP"
-        both_dn = t15 == "bearish" and d1h == "DOWN"
+        # GUVENILIR kaynak: state.structure_15m/1h (snapshot'lar bunu UP/UP gosterdi).
+        # structure.get('trend'/'dir_1h') bu dict'te YOK -> eski veto no-op'tu, #202/#203
+        # gibi UP/UP counter-trend short'lar sizdi.
+        t15 = str(getattr(state, "structure_15m", "") or "").upper()
+        d1h = str(getattr(state, "structure_1h", "") or "").upper()
+        both_up = t15 == "UP" and d1h == "UP"
+        both_dn = t15 == "DOWN" and d1h == "DOWN"
         if (candidate == "SHORT" and both_up) or (candidate == "LONG" and both_dn):
             msg = f"cift-zamanli trend (15m={t15}/1h={d1h}) — ters fade {candidate} yok"
             reasons.append(msg)

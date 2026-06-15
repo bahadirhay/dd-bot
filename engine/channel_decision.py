@@ -690,11 +690,17 @@ def decide_channel(
         try:
             from engine.regime_vr import edge_gate, classify_regime
 
-            ref_tp1 = float(getattr(cfg, "V3_TP1_MAX_BPS", 60) or 60)
+            # Hedef SABIT degil — KANAL genisliginden tureit (indikator yok, hesap).
+            # Dar kanal -> kucuk ulasilabilir hedef; genis -> tavan. Kutu min-40bps
+            # sarti olu chop'u zaten eler. Boylece sabit 60 kirilganligi biter.
+            cap_tp1 = float(getattr(cfg, "V3_TP1_MAX_BPS", 60) or 60)
+            band_bps = (r - s) / price * 1e4 if (r > s > 0 and price > 0) else cap_tp1
+            frac = float(getattr(cfg, "V3_TP1_FRAC_OF_BAND", 0.6) or 0.6)
+            ref_tp1 = max(20.0, min(cap_tp1, band_bps * frac))
             eg = edge_gate(price, ref_tp1)
             if not eg["allow"]:
                 msg = (f"edge yok: son range {eg['range_bps']:.0f}bps < hedef "
-                       f"{eg['need_bps']:.0f}bps (ulasilmaz)")
+                       f"{eg['need_bps']:.0f}bps (kanal={band_bps:.0f}bps, ulasilmaz)")
                 reasons.append(msg)
                 return {"final_decision": "WAIT", "reason": msg, "reasons": reasons,
                         "path": path, "zone": zone, "direction_scores": scores}

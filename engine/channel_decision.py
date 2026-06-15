@@ -641,16 +641,23 @@ def decide_channel(
         path = "breakout"
         candidate = breakout_side
         reasons.append(f"breakout 5m/3m {breakout_side}")
-        ok_cvd, cvd_note = cvd_breakout_supports(candidate, cvd)
-        if not ok_cvd:
-            return {
-                "final_decision": "WAIT",
-                "reason": cvd_note,
-                "reasons": reasons + [cvd_note],
-                "path": path,
-                "zone": zone,
-                "direction_scores": scores,
-            }
+        # TASARIM: TREND onayi = OI (pozisyonlama), taker DEGIL. Veri: yukselis
+        # taker-satisla yukseliyordu (yaniltici) ama OI +%2.9 (gercek yeni-long).
+        # Trend-devam (tc_level>0) icin OI zaten _trend_continuation'da dogrulandi;
+        # taker cvd-onayini ATLA. Pine-breakout icin taker onayi kalir.
+        if tc_level > 0:
+            reasons.append("trend onayi=OI (taker atlandi)")
+        else:
+            ok_cvd, cvd_note = cvd_breakout_supports(candidate, cvd)
+            if not ok_cvd:
+                return {
+                    "final_decision": "WAIT",
+                    "reason": cvd_note,
+                    "reasons": reasons + [cvd_note],
+                    "path": path,
+                    "zone": zone,
+                    "direction_scores": scores,
+                }
         # OI/squeeze filtresi: gercek breakout'ta yeni para girer (OI artar). OI
         # DUSUYORsa = pozisyon kapanisi (squeeze/unwind) -> sahte kirilim, girme.
         # (1698 spike: OI surekli dusuyordu = short-covering, gercek degil.)

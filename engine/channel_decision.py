@@ -716,7 +716,9 @@ def decide_channel(
         # yakin-direnci fade etmeyi onler. #201: px 1813, en yuksek seviye 1730 ->
         # short absurd (475bps blue sky). En saglam counter-trend korumasi.
         try:
-            _merged = pine_levels.get("all_levels") or levels.get("all_levels") or []
+            # Gercek Pine seviyeleri chart_levels'te (L1-L6); all_levels bos olabilir.
+            _merged = (pine_levels.get("chart_levels") or pine_levels.get("all_levels")
+                       or levels.get("chart_levels") or levels.get("all_levels") or [])
             _allpx = [float(l.get("price", 0) or 0) for l in _merged
                       if float(l.get("price", 0) or 0) > 0]
             _marg = price * 0.0015

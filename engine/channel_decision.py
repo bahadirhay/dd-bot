@@ -806,6 +806,19 @@ def decide_channel(
                 reasons.append(msg)
                 return {"final_decision": "WAIT", "reason": msg, "reasons": reasons,
                         "path": path, "zone": zone, "direction_scores": scores}
+            # TREND-GUCU kapisi (ASIL ayrac, veriyle dogrulandi): yonsellik yuksekse
+            # (trend) fade KATLEDILIR. Backtest 25 gun: fade'i yalniz trend-gucu <
+            # esik iken ac -> 4 ceyrekten 3'u pozitif (VR tek basina yapamadi).
+            if not reversal:
+                from engine.regime_vr import trend_strength_15m
+
+                ts_max = float(getattr(cfg, "V3_TREND_STR_MAX", 0.35) or 0.35)
+                tstr = trend_strength_15m()
+                if tstr >= ts_max:
+                    msg = f"trend-gucu {tstr:.2f} >= {ts_max:.2f} (yonsel/trend) — fade yok"
+                    reasons.append(msg)
+                    return {"final_decision": "WAIT", "reason": msg, "reasons": reasons,
+                            "path": path, "zone": zone, "direction_scores": scores}
         except Exception:
             pass
 

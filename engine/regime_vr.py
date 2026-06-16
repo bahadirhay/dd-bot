@@ -94,6 +94,27 @@ def classify_regime(prices: list[float] | None = None) -> dict:
     return out
 
 
+def trend_strength_15m(m: int | None = None) -> float:
+    """Yonsellik (efficiency ratio) = |net hareket| / Σ|bar adimi|, son m x15m bar.
+    0 -> tam chop/range (fade calisir), 1 -> tam trend (fade katledilir).
+    BACKTEST (25 gun, ceyrek-stabil): fade'i yalniz bu deger < V3_TREND_STR_MAX
+    iken aç -> trend ceyreklerini (C4 rallisi) eler, 3/4 ceyrek pozitif. VR tek
+    basina ayirmadi (bkz classify_regime); ASIL ayrac bu. Saf hesap, indikatorsuz."""
+    m = int(m or getattr(cfg, "V3_TREND_STR_BARS", 48) or 48)
+    try:
+        from engine.v3_common import bars_15m
+
+        bars = bars_15m(m + 4)[-(m + 1):]
+    except Exception:
+        return 1.0
+    cl = [float(b.get("close", 0) or 0) for b in bars if float(b.get("close", 0) or 0) > 0]
+    if len(cl) < max(8, m // 2):
+        return 1.0
+    net = abs(cl[-1] - cl[0])
+    tot = sum(abs(cl[i] - cl[i - 1]) for i in range(1, len(cl)))
+    return (net / tot) if tot > 0 else 1.0
+
+
 def edge_gate(price: float, ref_target_bps: float) -> dict:
     """
     ASIL kapi (veriyle dogrulandi): son realized range, hedef (TP1) mesafesini

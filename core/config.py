@@ -600,6 +600,11 @@ class Config:
         os.getenv("V3_WICK_STRENGTH_MULTIPLIER", "2.0")
     )
     V3_MIN_RR_RATIO = float(os.getenv("V3_MIN_RR_RATIO", "2.0"))
+    # Trend-gucu (efficiency ratio) fade kapisi — backtest 25 gun: fade'i yalniz
+    # yonsellik bu esigin ALTINDA (range) iken aç -> trend ceyreklerini eler, 3/4
+    # ceyrek pozitif. Saf hesap (|net|/Σ|adim|), indikatorsuz. 0=chop, 1=trend.
+    V3_TREND_STR_MAX = float(os.getenv("V3_TREND_STR_MAX", "0.35"))
+    V3_TREND_STR_BARS = int(os.getenv("V3_TREND_STR_BARS", "48"))   # 48x15m = 12h
     # Reverse (flip) sinyal için min SHORT/LONG olasılık eşiği
     V3_REVERSE_MIN_SCORE_PROB = float(os.getenv("V3_REVERSE_MIN_SCORE_PROB", "55.0"))
     # Swing high fallback için min RR (normal RR'den daha gevşek olabilir)

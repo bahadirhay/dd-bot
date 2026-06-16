@@ -605,6 +605,17 @@ class Config:
     # ceyrek pozitif. Saf hesap (|net|/Σ|adim|), indikatorsuz. 0=chop, 1=trend.
     V3_TREND_STR_MAX = float(os.getenv("V3_TREND_STR_MAX", "0.35"))
     V3_TREND_STR_BARS = int(os.getenv("V3_TREND_STR_BARS", "48"))   # 48x15m = 12h
+    # --- Strateji B: funding + fiyat MEAN-REVERSION (S/R'siz, indikatorsuz) ---
+    # Walk-forward 7/7 pozitif. VARSAYILAN KAPALI — once paper/kucuk-boyut dogrula.
+    V3_STRATEGY_B_ENABLED = os.getenv("V3_STRATEGY_B_ENABLED", "false").lower() in ("1", "true", "yes")
+    V3_B_STRETCH_T = float(os.getenv("V3_B_STRETCH_T", "1.2"))        # giris esigi (std)
+    V3_B_FUNDING_WINDOW = int(os.getenv("V3_B_FUNDING_WINDOW", "96")) # 96x15m = 24h z-pencere
+    V3_B_PRICE_Z_WIN = int(os.getenv("V3_B_PRICE_Z_WIN", "32"))       # fiyat z-score penceresi
+    V3_B_MOM_BARS = int(os.getenv("V3_B_MOM_BARS", "16"))             # momentum (4h)
+    V3_B_HARD_SL_BPS = float(os.getenv("V3_B_HARD_SL_BPS", "60"))     # ASIL guvenlik: sinirsiz risk yok
+    V3_B_MAXHOLD_BARS = int(os.getenv("V3_B_MAXHOLD_BARS", "16"))     # zaman-stop (4h)
+    V3_B_BREAKER_LOSSES = int(os.getenv("V3_B_BREAKER_LOSSES", "3"))  # ardisik kayip
+    V3_B_BREAKER_COOL_BARS = int(os.getenv("V3_B_BREAKER_COOL_BARS", "8"))  # dur suresi (bar)
     # Reverse (flip) sinyal için min SHORT/LONG olasılık eşiği
     V3_REVERSE_MIN_SCORE_PROB = float(os.getenv("V3_REVERSE_MIN_SCORE_PROB", "55.0"))
     # Swing high fallback için min RR (normal RR'den daha gevşek olabilir)

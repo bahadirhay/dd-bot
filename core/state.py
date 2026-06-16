@@ -59,6 +59,9 @@ class BotState:
     last_close_source: str = ""
     last_close_side: str = ""
     last_close_price: float = 0.0
+    # Her kapanista (bot/borsa-sync/paper) set edilir — re-entry kapisi mum-kapanis
+    # bazli (sure degil): kapanistan sonra tam bir taze 1m mum kapanana kadar giris yok.
+    last_pos_close_ts: float = 0.0
     auto_trade_period: int = 0
     last_auto_trade_ts: float = 0.0
     session_start_ts: float = 0.0

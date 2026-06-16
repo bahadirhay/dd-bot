@@ -72,6 +72,9 @@ def finalize_position_closed(
         state.last_close_source = source
         state.last_close_side = prev_side
         state.last_close_price = xpx
+        # Re-entry kapisi icin kapanis ani (sebep/kaynak fark etmez — borsa-sync de
+        # dahil). Sure-bazli cooldown yerine mum-kapanis kapisi bunu kullanir.
+        state.last_pos_close_ts = time.time()
 
         try:
             from engine.market_narrative import record_trade_exit

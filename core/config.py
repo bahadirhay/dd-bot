@@ -705,7 +705,12 @@ class Config:
     V3_REVERSAL_EXIT_CVD = float(os.getenv("V3_REVERSAL_EXIT_CVD", "3000"))
     # Korumali cikistan sonra ayni/yeni yon icin yeniden giris bekleme suresi.
     # Ac-kapa cigini (skor-exit -> aninda tekrar ac -> skor-exit ...) onler.
+    # NOT: artik kullanilmiyor — re-entry kapisi SURE degil MUM-KAPANIS bazli
+    # (V3_REENTRY_BARS_1M). Geri-uyumluluk icin birakildi.
     V3_REENTRY_COOLDOWN_SEC = float(os.getenv("V3_REENTRY_COOLDOWN_SEC", "120"))
+    # Re-entry kapisi: kapanistan sonra kac TAM taze 1m mum kapanmali (sure degil,
+    # olay-bazli). 1 -> bir tam taze mum (cur_bar-close_bar>=2). 0 -> kapali.
+    V3_REENTRY_BARS_1M = int(os.getenv("V3_REENTRY_BARS_1M", "1"))
     # Score-exit min tutus: taze pozisyon bu sureden once skor-zayif ile kapatilmaz.
     V3_SCORE_EXIT_MIN_HOLD_SEC = float(os.getenv("V3_SCORE_EXIT_MIN_HOLD_SEC", "60"))
     # Fade yapi-hizasi: yapi karsi-yonde bu kadar onde ise (skor farki) o yone

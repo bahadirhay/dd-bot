@@ -30,11 +30,30 @@ def _mark_protect_exit() -> None:
 
 
 def _reentry_blocked() -> tuple[bool, float]:
-    cd = float(getattr(cfg, "V3_REENTRY_COOLDOWN_SEC", 120) or 0)
-    if cd <= 0:
+    """Re-entry kapisi — SURE degil, MUM-KAPANIS bazli (kullanici kurali: hesaplama/
+    olay-bazli cozum). Kapanistan sonra TAM bir taze 1m mum kapanana kadar yeni giris
+    yok. Kapanis ani state.last_pos_close_ts (HER kapanista set edilir — borsa-sync
+    dahil; eski cooldown sadece bot-cikislarinda armleniyordu, #204 boyle sizdi).
+    Bar-aritmetigi: kapanis bari B ise, ilk tam taze bar B+1, o da B+2'de kapanir ->
+    re-entry cur_bar >= B+2'de serbest. Ayarlanabilir saniye yok; mum sinirina hizali."""
+    bars = int(getattr(cfg, "V3_REENTRY_BARS_1M", 1) or 0)
+    if bars <= 0:
         return False, 0.0
-    elapsed = time.time() - _last_protect_exit_ts
-    return (elapsed < cd), max(0.0, cd - elapsed)
+    close_ts = float(getattr(state, "last_pos_close_ts", 0) or 0)
+    if close_ts <= 0:
+        return False, 0.0
+    BAR = 60.0  # karar mumu = 1m
+    now = time.time()
+    close_bar = close_ts // BAR
+    cur_bar = now // BAR
+    # bars=1 -> tam 1 taze mum -> fark >= bars+1 (=2) gerekir
+    need = bars + 1
+    if (cur_bar - close_bar) >= need:
+        return False, 0.0
+    # bilgi amacli kalan saniye (bir sonraki uygun bar sinirina)
+    next_ok_bar = close_bar + need
+    kalan = max(0.0, next_ok_bar * BAR - now)
+    return True, kalan
 
 
 def _confirm_tick(key: str, condition: bool) -> bool:
@@ -343,7 +362,7 @@ async def execute_entry(details: dict, source: str = "breakout") -> bool:
 
     blocked_cd, kalan = _reentry_blocked()
     if blocked_cd:
-        msg = f"re-entry cooldown {kalan:.0f}s (korumali cikis sonrasi ac-kapa onlendi)"
+        msg = f"re-entry: taze 1m mum kapanisi bekleniyor (~{kalan:.0f}s) — ac-kapa churn onlendi"
         log.info(f"Giriş atlandı — {msg} ({source})")
         state.no_entry_reason = msg
         _v3_execute_block(details, source, "reentry_cooldown", msg)

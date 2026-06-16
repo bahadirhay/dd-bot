@@ -741,6 +741,9 @@ class Config:
     # kutuyu (son N x 15m swing high/low) fade bandi yap (iki kenar da, ulasilabilir).
     V3_ADAPTIVE_BOX_ENABLED = os.getenv("V3_ADAPTIVE_BOX_ENABLED", "true").lower() in ("1", "true", "yes")
     V3_BOX_LOOKBACK_BARS = int(os.getenv("V3_BOX_LOOKBACK_BARS", "24"))      # 24x15m = 6h
+    # Uyarlanabilir lookback alt siniri: kutu genisligi cap'i asinca lookback 24'ten
+    # buraya kadar kisaltilir (bayat tepeyi disla, yerel baz-dibini koru).
+    V3_BOX_LOOKBACK_MIN = int(os.getenv("V3_BOX_LOOKBACK_MIN", "8"))
     V3_BOX_MIN_WIDTH_BPS = float(os.getenv("V3_BOX_MIN_WIDTH_BPS", "40"))
     V3_BOX_MAX_WIDTH_BPS = float(os.getenv("V3_BOX_MAX_WIDTH_BPS", "220"))
     V3_BOX_PINE_FAR_MULT = float(os.getenv("V3_BOX_PINE_FAR_MULT", "1.5"))

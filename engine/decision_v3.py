@@ -218,6 +218,8 @@ def _sync_snap_zone_for_logs(snap: dict) -> None:
     levels = snap.get("levels") or {}
     if not isinstance(levels, dict):
         return
+    if snap.get("channel_authority") or levels.get("channel_authority"):
+        return
     active = (state.v3_levels or {}).get("active") or {}
     zone = str(active.get("zone") or levels.get("zone") or "")
     if not zone:
@@ -235,9 +237,23 @@ def _commit_decision(snap: dict, *, flow_tag: str = "", flow_force: bool = False
     levels = snap.get("levels") or {}
     zone = str(levels.get("zone") or "MID_RANGE")
     is_breakout = scn_name.startswith("BREAKOUT_")
-    trade_candidate = scn_name not in ("WAIT",) and not (
-        zone == "MID_RANGE" and not is_breakout
-    )
+    ch = snap.get("channel_decision") or {}
+    if snap.get("channel_authority") or levels.get("channel_authority"):
+        zone = str(ch.get("zone") or zone)
+        path = str(ch.get("path") or "")
+        ch_action = str(ch.get("final_decision") or snap.get("action") or "WAIT")
+        if ch_action in ("LONG", "SHORT"):
+            trade_candidate = True
+        elif zone in ("NEAR_SUPPORT", "NEAR_RESISTANCE") and path == "fade":
+            trade_candidate = True
+        elif path == "breakout":
+            trade_candidate = True
+        else:
+            trade_candidate = False
+    else:
+        trade_candidate = scn_name not in ("WAIT", "CHANNEL_WAIT") and not (
+            zone == "MID_RANGE" and not is_breakout
+        )
     try:
         from engine.attribution_v3 import maybe_log_attribution
 
@@ -327,6 +343,13 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
     from core.state import effective_price
 
     px = float(effective_price() or state.mark_price or state.price or 0)
+    # Strateji B paper (shadow): gercek emir YOK, sinyal+sanal PnL kaydeder.
+    try:
+        from engine.strategy_b_v3 import paper_tick
+
+        paper_tick()
+    except Exception:
+        pass
     update_levels()
     from engine.market_state_v3 import get_market_state, update_market_state
 
@@ -343,6 +366,20 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
     if scn_name.startswith("BREAKOUT_"):
         breakout_side = "BUY" if "BUY" in scn_name else "SELL"
     cvd = update_cvd_snapshot(zone=zone, breakout_side=breakout_side)
+
+    if getattr(cfg, "V3_CHANNEL_AUTHORITY", False):
+        from engine.channel_decision import update_decision_channel_authority
+
+        return update_decision_channel_authority(
+            px=px,
+            levels=levels,
+            structure=structure,
+            scenario=scenario,
+            cvd=cvd,
+            signal=signal,
+            flow_tag=flow_tag,
+            flow_force=flow_force,
+        )
 
     # ── Range locked durumu ───────────────────────────────────────────────────
     s1h_data = (structure.get("1h") or {})
@@ -826,6 +863,14 @@ def _update_decision_probabilistic(
         action == _aligned_dir
         and _sel_rr >= float(getattr(cfg, "V3_ALIGNED_MIN_RR", 2.0) or 2.0)
     )
+    # Baypas yalniz GERCEK trend varken gecerli. RANGE_BAND modunda (1h UNCLEAR,
+    # yatay olu bant) dominant_bias bir trend degil, yapisal Event-bias'tir; bu
+    # durumda hizali-guclu istisnasini kaldir ki prob kapisi calissin. Boylece
+    # olu bantta yazi-tura SHORT/LONG acilmaz (churn kaynagi).
+    if bool(getattr(cfg, "V3_ALIGNED_REQUIRE_TREND", True)):
+        _mode = str(scores.get("decision_mode") or "").upper()
+        if _mode == "RANGE_BAND":
+            _aligned_strong = False
     if _side_prob < _min_edge and not _aligned_strong:
         snap = {
             "action": "WAIT",

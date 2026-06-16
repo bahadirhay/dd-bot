@@ -72,6 +72,55 @@ def _migrate_box_log(db: sqlite3.Connection) -> None:
     db.execute("CREATE INDEX IF NOT EXISTS idx_box_log_ts ON box_log(ts DESC)")
 
 
+def _migrate_b_paper(db: sqlite3.Connection) -> None:
+    """Strateji B paper (shadow) kayitlari — gercek emir YOK, sinyal+sanal PnL izlenir."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS b_paper (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            open_ts    REAL NOT NULL,
+            open_human TEXT,
+            side       TEXT,
+            entry      REAL,
+            stretch    REAL,
+            close_ts   REAL,
+            exit       REAL,
+            pnl_bps    REAL,
+            reason     TEXT,
+            status     TEXT DEFAULT 'OPEN'
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_bpaper_ts ON b_paper(open_ts DESC)")
+
+
+def log_b_paper_open(side: str, entry: float, stretch: float) -> int:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            cur = db.execute(
+                "INSERT INTO b_paper (open_ts,open_human,side,entry,stretch,status) "
+                "VALUES (?,?,?,?,?, 'OPEN')",
+                (datetime.now().timestamp(),
+                 datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                 str(side), float(entry or 0), float(stretch or 0)),
+            )
+            return int(cur.lastrowid or 0)
+    except Exception:
+        return 0
+
+
+def log_b_paper_close(row_id: int, exit_px: float, pnl_bps: float, reason: str) -> None:
+    from datetime import datetime
+    try:
+        with _conn() as db:
+            db.execute(
+                "UPDATE b_paper SET close_ts=?, exit=?, pnl_bps=?, reason=?, status='CLOSED' WHERE id=?",
+                (datetime.now().timestamp(), float(exit_px or 0), float(pnl_bps or 0),
+                 str(reason), int(row_id)),
+            )
+    except Exception:
+        pass
+
+
 def log_box_decision(data: dict) -> None:
     """Kutu kararini kaydet (yalniz degisiklik/kullanim aninda cagrilmali)."""
     from datetime import datetime, timezone
@@ -265,6 +314,7 @@ def init():
         _migrate_v3_attribution_columns(db)
         _migrate_trades_learning_columns(db)
         _migrate_box_log(db)
+        _migrate_b_paper(db)
     print("DB hazır:", cfg.DB_PATH)
     try:
         n = backfill_closed_trade_metrics()

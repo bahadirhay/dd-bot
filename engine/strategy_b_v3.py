@@ -193,6 +193,49 @@ def should_exit(side: str, entry_px: float, entry_bar: int, mark: float) -> tupl
     return False, ""
 
 
+# --- PAPER (shadow) modu: gercek emir YOK, sinyal+sanal PnL DB'ye yazilir ---
+_paper_pos: dict | None = None
+
+
+def paper_tick() -> None:
+    """Her karar dongusunde cagrilir. B sinyal verince SANAL pozisyon acar/kapatir
+    ve b_paper tablosuna yazar — gercek emir ASLA gondermez. Canli sinyal birikimi
+    icin (gercek para riski yok). V3_B_PAPER_LOG ile acilir."""
+    global _paper_pos
+    if not bool(getattr(cfg, "V3_B_PAPER_LOG", True)):
+        return
+    px = float(getattr(state, "mark_price", 0) or getattr(state, "price", 0) or 0)
+    if px <= 0:
+        return
+    try:
+        from botlog.db import log_b_paper_close, log_b_paper_open
+
+        fee = 3.0
+        if _paper_pos is None:
+            if breaker_blocked():
+                return
+            sig = compute_signal()
+            if not sig.get("ready") or not sig.get("signal"):
+                return
+            rid = log_b_paper_open(sig["signal"], px, sig["stretch"])
+            _paper_pos = {"id": rid, "side": sig["signal"], "entry": px, "bar": _bar_id()}
+            log.info(f"[B-PAPER] {sig['signal']} @ {px:.2f} gerginlik={sig['stretch']} "
+                     f"parts={sig.get('parts')}")
+        else:
+            ex, reason = should_exit(_paper_pos["side"], _paper_pos["entry"],
+                                     _paper_pos["bar"], px)
+            if ex:
+                side = _paper_pos["side"]; ent = _paper_pos["entry"]
+                pnl = ((px - ent) if side == "LONG" else (ent - px)) / ent * 1e4 - fee
+                log_b_paper_close(_paper_pos["id"], px, pnl, reason)
+                on_trade_closed(pnl)
+                log.info(f"[B-PAPER] KAPANDI {side} {ent:.2f}->{px:.2f} "
+                         f"pnl={pnl:+.0f}bps ({reason})")
+                _paper_pos = None
+    except Exception as ex:
+        log.warning(f"[B-PAPER] tick: {ex}")
+
+
 def evaluate() -> dict:
     """Ust seviye: B aktif mi + devre kesici + sinyal. executor entegrasyonu icin."""
     if not bool(getattr(cfg, "V3_STRATEGY_B_ENABLED", False)):

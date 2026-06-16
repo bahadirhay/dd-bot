@@ -616,6 +616,9 @@ class Config:
     V3_B_MAXHOLD_BARS = int(os.getenv("V3_B_MAXHOLD_BARS", "16"))     # zaman-stop (4h)
     V3_B_BREAKER_LOSSES = int(os.getenv("V3_B_BREAKER_LOSSES", "3"))  # ardisik kayip
     V3_B_BREAKER_COOL_BARS = int(os.getenv("V3_B_BREAKER_COOL_BARS", "8"))  # dur suresi (bar)
+    # B PAPER (shadow) modu: gercek emir YOK, sinyal+sanal PnL b_paper tablosuna
+    # yazilir (canli sinyal birikimi, risk yok). Acik = topla.
+    V3_B_PAPER_LOG = os.getenv("V3_B_PAPER_LOG", "true").lower() in ("1", "true", "yes")
     # Reverse (flip) sinyal için min SHORT/LONG olasılık eşiği
     V3_REVERSE_MIN_SCORE_PROB = float(os.getenv("V3_REVERSE_MIN_SCORE_PROB", "55.0"))
     # Swing high fallback için min RR (normal RR'den daha gevşek olabilir)

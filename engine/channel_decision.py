@@ -864,6 +864,19 @@ def decide_channel(
                 scores["entry_long_score"] = float(scores.get("entry_long_score", 0)) - penalty
             else:
                 scores["entry_short_score"] = float(scores.get("entry_short_score", 0)) - penalty
+        # TUTARLILIK kapisi (hesaba-dayali, eshik oynatmak DEGIL): "kapatacagin
+        # islemi acma". Cikis (score_weak_exit) prob < V3_SCORE_EXIT_PROB ise kapatir;
+        # o halde GIRIS de ayni esigi gerektirsin. Yoksa geometri (zone=dirence)
+        # prob %40 short aciyor, cikis aninda kesiyor (#208/#209: bos ac-zararla kapa).
+        exit_th = float(getattr(cfg, "V3_SCORE_EXIT_PROB", 0.55) or 0.55)
+        key = "prob_short_pct" if candidate == "SHORT" else "prob_long_pct"
+        prob_side = float(scores.get(key, 0) or 0) / 100.0
+        if prob_side > 0 and prob_side < exit_th:
+            msg = (f"yon-skoru tutarsiz: {candidate} prob=%{prob_side*100:.0f} < cikis "
+                   f"esigi %{exit_th*100:.0f} — geometri dirençte ama skor ters, acma")
+            reasons.append(msg)
+            return {"final_decision": "WAIT", "reason": msg, "reasons": reasons,
+                    "path": path, "zone": zone, "direction_scores": scores}
         ok_sc, sc_note = _score_passes(candidate, scores, mode="fade")
         reasons.append(sc_note)
         if not ok_sc:

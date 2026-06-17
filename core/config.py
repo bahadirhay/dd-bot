@@ -623,6 +623,10 @@ class Config:
     # B PAPER (shadow) modu: gercek emir YOK, sinyal+sanal PnL b_paper tablosuna
     # yazilir (canli sinyal birikimi, risk yok). Acik = topla.
     V3_B_PAPER_LOG = os.getenv("V3_B_PAPER_LOG", "true").lower() in ("1", "true", "yes")
+    # B runner: mean'e ulasinca %50 al, kalanini trail ile koştur (devam yakala).
+    # Veri: full +866 -> runner +960 (+94bps). trail = peak'ten geri donus esigi.
+    V3_B_RUNNER_ENABLED = os.getenv("V3_B_RUNNER_ENABLED", "true").lower() in ("1", "true", "yes")
+    V3_B_RUNNER_TRAIL_BPS = float(os.getenv("V3_B_RUNNER_TRAIL_BPS", "30"))
     # Kanal-LONG paper (shadow): destekten donus-teyitli long — gercek emir YOK, sadece
     # kayit. Backtest negatif dedi ama canli veride dogrulamak icin. Birkac gun izle.
     V3_CHLONG_PAPER = os.getenv("V3_CHLONG_PAPER", "true").lower() in ("1", "true", "yes")

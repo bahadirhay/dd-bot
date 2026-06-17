@@ -232,16 +232,36 @@ def paper_tick() -> None:
             log.info(f"[B-PAPER] {sig['signal']} @ {px:.2f} gerginlik={sig['stretch']} "
                      f"parts={sig.get('parts')}")
         else:
-            ex, reason = should_exit(_paper_pos["side"], _paper_pos["entry"],
-                                     _paper_pos["bar"], px)
-            if ex:
-                side = _paper_pos["side"]; ent = _paper_pos["entry"]
-                pnl = ((px - ent) if side == "LONG" else (ent - px)) / ent * 1e4 - fee
-                log_b_paper_close(_paper_pos["id"], px, pnl, reason)
-                on_trade_closed(pnl)
-                log.info(f"[B-PAPER] KAPANDI {side} {ent:.2f}->{px:.2f} "
-                         f"pnl={pnl:+.0f}bps ({reason})")
-                _paper_pos = None
+            side = _paper_pos["side"]; ent = _paper_pos["entry"]
+            cur = ((px - ent) if side == "LONG" else (ent - px)) / ent * 1e4
+            runner_on = bool(getattr(cfg, "V3_B_RUNNER_ENABLED", True))
+            phase = _paper_pos.get("phase", "open")
+            if phase == "open":
+                ex, reason = should_exit(side, ent, _paper_pos["bar"], px)
+                if ex and runner_on and "ortalamaya donus" in reason:
+                    # MEAN'e ulasti: yariyi kilitle, kalanini RUNNER'a koy (devam yakala).
+                    # Veri: full +866 -> runner +960 (+94bps, 1765->1800 gibi devamlari alir).
+                    _paper_pos.update(phase="runner", half=cur, peak=px)
+                    log.info(f"[B-PAPER] {side} mean'e ulasti pnl={cur:+.0f} — %50 al, runner basladi")
+                elif ex:
+                    pnl = cur - fee
+                    log_b_paper_close(_paper_pos["id"], px, pnl, reason)
+                    on_trade_closed(pnl); _paper_pos = None
+                    log.info(f"[B-PAPER] KAPANDI {side} {ent:.2f}->{px:.2f} pnl={pnl:+.0f}bps ({reason})")
+            else:  # runner: peak'ten trail kadar geri donunce / SL / 2x maxhold -> kapat
+                trail = float(getattr(cfg, "V3_B_RUNNER_TRAIL_BPS", 30) or 30)
+                sl = float(getattr(cfg, "V3_B_HARD_SL_BPS", 60) or 60)
+                mh = int(getattr(cfg, "V3_B_MAXHOLD_BARS", 16) or 16)
+                if side == "LONG":
+                    _paper_pos["peak"] = max(_paper_pos["peak"], px); retr = (_paper_pos["peak"] - px) / ent * 1e4
+                else:
+                    _paper_pos["peak"] = min(_paper_pos["peak"], px); retr = (px - _paper_pos["peak"]) / ent * 1e4
+                adverse = ((px - ent) if side == "SHORT" else (ent - px)) / ent * 1e4
+                if retr >= trail or adverse >= sl or (_bar_id() - _paper_pos["bar"]) >= mh * 2:
+                    blended = 0.5 * _paper_pos["half"] + 0.5 * cur - fee
+                    log_b_paper_close(_paper_pos["id"], px, blended, "runner-trail")
+                    on_trade_closed(blended); _paper_pos = None
+                    log.info(f"[B-PAPER] RUNNER kapandi {side} blended={blended:+.0f}bps")
     except Exception as ex:
         log.warning(f"[B-PAPER] tick: {ex}")
 

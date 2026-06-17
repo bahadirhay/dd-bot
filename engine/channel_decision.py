@@ -875,14 +875,33 @@ def decide_channel(
                 scores["entry_long_score"] = float(scores.get("entry_long_score", 0)) - penalty
             else:
                 scores["entry_short_score"] = float(scores.get("entry_short_score", 0)) - penalty
+        # GERCEK-KENAR KANAL YOLU (ekleyici, OR): RANGE'de fiyat GERCEK kanal kenarinda
+        # (Pine S/R, kutu degil) ise yon = kanal konumu; skor-kapilari ASKIYA alinir.
+        # Cunku range'de skor (trend/yapi-bazli) kanala KARSI calisiyor (destekte bile
+        # prob_long %35). Kullanici: "kanal ici islem". #208/#209 SOFT kenardaydi
+        # (1805, gercek direnc 1820 degil) -> gercek-kenar sarti onlari yine eler.
+        _band = (pine_r - pine_s) if (pine_r > pine_s > 0) else 0.0
+        _ef = max(float(getattr(cfg, "V3_CHANNEL_EDGE_FRAC", 0.22) or 0.22), 0.05)
+        _genuine_edge = False
+        if _band > 0:
+            if candidate == "LONG" and price <= pine_s + _ef * _band:
+                _genuine_edge = True
+            elif candidate == "SHORT" and price >= pine_r - _ef * _band:
+                _genuine_edge = True
+        _range_edge_ok = (not _is_trend) and _genuine_edge
+        if _range_edge_ok:
+            reasons.append(f"gercek-kenar kanal yolu (range, {candidate}@Pine kenar) "
+                           f"— skor-kapilari askida")
+
         # TUTARLILIK kapisi (hesaba-dayali, eshik oynatmak DEGIL): "kapatacagin
         # islemi acma". Cikis (score_weak_exit) prob < V3_SCORE_EXIT_PROB ise kapatir;
         # o halde GIRIS de ayni esigi gerektirsin. Yoksa geometri (zone=dirence)
         # prob %40 short aciyor, cikis aninda kesiyor (#208/#209: bos ac-zararla kapa).
+        # GERCEK-KENAR range fade bu kapidan MUAF (kanal konumu sinyalin kendisi).
         exit_th = float(getattr(cfg, "V3_SCORE_EXIT_PROB", 0.55) or 0.55)
         key = "prob_short_pct" if candidate == "SHORT" else "prob_long_pct"
         prob_side = float(scores.get(key, 0) or 0) / 100.0
-        if prob_side > 0 and prob_side < exit_th:
+        if prob_side > 0 and prob_side < exit_th and not _range_edge_ok:
             msg = (f"yon-skoru tutarsiz: {candidate} prob=%{prob_side*100:.0f} < cikis "
                    f"esigi %{exit_th*100:.0f} — geometri dirençte ama skor ters, acma")
             reasons.append(msg)
@@ -890,7 +909,7 @@ def decide_channel(
                     "path": path, "zone": zone, "direction_scores": scores}
         ok_sc, sc_note = _score_passes(candidate, scores, mode="fade")
         reasons.append(sc_note)
-        if not ok_sc:
+        if not ok_sc and not _range_edge_ok:
             return {
                 "final_decision": "WAIT",
                 "reason": sc_note,

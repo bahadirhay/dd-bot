@@ -145,6 +145,16 @@ def compute_signal() -> dict:
 
     T = float(getattr(cfg, "V3_B_STRETCH_T", 1.2) or 1.2)
     sig = "SHORT" if stretch >= T else ("LONG" if stretch <= -T else None)
+    # MAKRO-YON kapisi (B'nin trend-korumasi, veriyle dogrulandi): guclu yonlu
+    # makro harekette o yone fade ACMA. Efficiency-ratio yaramadi; yonsel makro
+    # tam da B'yi olduren "guclu trendi fade" islemlerini keser. 25 gun: edge
+    # korundu (+1086->+1060) isabet %45->%54; trend penceresi -429->-93.
+    macro_bps = float(getattr(cfg, "V3_B_MACRO_BPS", 150) or 0)
+    if sig and macro_bps > 0 and len(C) > 96 and C[-97] > 0:
+        macro = (C[-1] - C[-97]) / C[-97] * 1e4   # ~24h egim
+        if (sig == "SHORT" and macro > macro_bps) or (sig == "LONG" and macro < -macro_bps):
+            out["macro_block"] = round(macro, 0)
+            sig = None
     out.update({"ready": True, "stretch": round(stretch, 3), "signal": sig,
                 "px_z": round(px_z, 3) if px_z is not None else None,
                 "parts": {k: round(v, 2) for k, v in parts.items()}})

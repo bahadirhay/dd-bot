@@ -616,6 +616,10 @@ class Config:
     V3_B_MAXHOLD_BARS = int(os.getenv("V3_B_MAXHOLD_BARS", "16"))     # zaman-stop (4h)
     V3_B_BREAKER_LOSSES = int(os.getenv("V3_B_BREAKER_LOSSES", "3"))  # ardisik kayip
     V3_B_BREAKER_COOL_BARS = int(os.getenv("V3_B_BREAKER_COOL_BARS", "8"))  # dur suresi (bar)
+    # B makro-yon kapisi (trend-korumasi): 24h egim > +bps ise short, < -bps ise long
+    # ACMA. B'nin trendde bleed'ini keser (efficiency-ratio yaramadi; bu yonsel filtre
+    # 25 gun edge'i korudu +1060, isabet %54, trend penceresi -429->-93).
+    V3_B_MACRO_BPS = float(os.getenv("V3_B_MACRO_BPS", "150"))
     # B PAPER (shadow) modu: gercek emir YOK, sinyal+sanal PnL b_paper tablosuna
     # yazilir (canli sinyal birikimi, risk yok). Acik = topla.
     V3_B_PAPER_LOG = os.getenv("V3_B_PAPER_LOG", "true").lower() in ("1", "true", "yes")

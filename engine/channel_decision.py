@@ -713,6 +713,26 @@ def decide_channel(
                 "direction_scores": scores,
             }
 
+        # DONUS-TEYIDI (yalniz SHORT, veriyle dogrulandi): direnc-fade'i, fiyat
+        # YENI TEPE yapmayi BIRAKANA kadar bekle. Veri (25 gun): aninda direnc-short
+        # -321bps (%46), donus-teyitli +83bps -> sahte-yukari-kirilimlari eler,
+        # "yukselen direnci shortlama, reddedince shortla". LONG'a EKLENMEDI (long@destek
+        # teyitle de kaybediyordu -544; dokunulmadi). Saf hesap (son K x15m tepe).
+        if candidate == "SHORT" and bool(getattr(cfg, "V3_FADE_REJECT_CONFIRM", True)):
+            try:
+                from engine.v3_common import bars_15m
+
+                k = int(getattr(cfg, "V3_FADE_REJECT_BARS", 2) or 2)
+                bb = bars_15m(k + 3)
+                hs = [float(b.get("high", 0) or 0) for b in bb if float(b.get("high", 0) or 0) > 0]
+                if len(hs) >= k + 1 and hs[-1] >= max(hs[-(k + 1):-1]) - 1e-9:
+                    msg = "donus-teyidi yok: direnc hala yeni tepe yapiyor — short bekle"
+                    reasons.append(msg)
+                    return {"final_decision": "WAIT", "reason": msg, "reasons": reasons,
+                            "path": path, "zone": zone, "direction_scores": scores}
+            except Exception:
+                pass
+
         # BLUE-SKY vetosu (HARD, fiyat-bazli — etikete bagli degil): fiyat TUM gercek
         # seviyelerin belirgin USTUNDEyse short YOK (altindaysa long YOK). Sentetik
         # yakin-direnci fade etmeyi onler. #201: px 1813, en yuksek seviye 1730 ->

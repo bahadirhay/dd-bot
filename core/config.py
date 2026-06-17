@@ -814,6 +814,10 @@ class Config:
     # bozulmada skor-exit. Aradaki band = teze baglilik. %82 erken score_weak_exit'i
     # ve kar-geri-vermeyi keser; TP1 sonrasi skor-exit zaten devre disi (yapisal yonetir).
     V3_SCORE_EXIT_HARD_PROB = float(os.getenv("V3_SCORE_EXIT_HARD_PROB", "0.40"))
+    # Donus-teyidi (YALNIZ SHORT): direnci fade etmeden once fiyat yeni-tepe yapmayi
+    # birakmali (son K x15m bar). Veri: aninda -321 -> teyitli +83. Long'a EKLENMEDI.
+    V3_FADE_REJECT_CONFIRM = os.getenv("V3_FADE_REJECT_CONFIRM", "true").lower() in ("1", "true", "yes")
+    V3_FADE_REJECT_BARS = int(os.getenv("V3_FADE_REJECT_BARS", "2"))
     # Kanal-fade trend filtresi: guclu ters trendde (15m guc>=esik) fade acma
     V3_CHANNEL_FADE_TREND_FILTER = os.getenv("V3_CHANNEL_FADE_TREND_FILTER", "true").lower() in ("1", "true", "yes")
     V3_CHANNEL_FADE_TREND_STR = float(os.getenv("V3_CHANNEL_FADE_TREND_STR", "80"))

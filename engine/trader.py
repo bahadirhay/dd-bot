@@ -288,24 +288,32 @@ async def _maybe_protective_exit() -> bool:
                 await close_position(reason="flow_reversal_exit")
                 return True
 
-            # Skor-farkinda erken cikis: tez ARTIK desteklemiyorsa (prob_side zayif)
-            # ve bu ardisik N tick surduyse cik. Guclu skorda TUT (hard-cap'e kadar
-            # nefes). Anlik prob dalgalanmasi tek-tick'te tetiklemez (debounce).
-            # MIN TUTUS: taze pozisyonu hemen kapatma -> ac-kapa cigini onler.
+            # Skor-farkinda erken cikis — HISTEREZIS + YAPIYA BAGLILIK (global cozum):
+            # Veri: son 40 islemin %82'si score_weak_exit ile, hedefe varmadan kapaniyor;
+            # TP1'e ulasan %10. Sebep: giris esigi (%55) ile cikis esigi (%55) ayni ->
+            # islem cikis sinirinda doguyor, minor oynamada aninda kapaniyor (churn,
+            # kar-geri-verme #213). Cozum:
+            #  (1) HISTEREZIS: gir >=%55 ama cik yalniz prob < V3_SCORE_EXIT_HARD_PROB
+            #      (%40) = GUCLU bozulma. Aradaki band = teze baglilik bolgesi.
+            #  (2) YAPIYA BAGLILIK: TP1 vurulduysa skor-exit YOK -> yapisal TP/SL +
+            #      runner-trail yonetsin (hedef oynasin). Hard-cap + flow-reversal hala
+            #      aktif (felaket korumasi kaybedilmez).
+            if bool(getattr(state, "pos_tp1_hit", False)):
+                return False  # TP1 sonrasi yapisal/runner yonetir, skor-exit devre disi
             min_hold = float(getattr(cfg, "V3_SCORE_EXIT_MIN_HOLD_SEC", 60) or 0)
             pos_age = time.time() - float(getattr(state, "pos_open_ts", 0) or 0)
             if min_hold > 0 and pos_age < min_hold:
                 return False
-            exit_th = float(getattr(cfg, "V3_SCORE_EXIT_PROB", 0.55) or 0.55)
+            exit_th = float(getattr(cfg, "V3_SCORE_EXIT_HARD_PROB", 0.40) or 0.40)
             ds = (getattr(state, "v3_decision", None) or {}).get("direction_scores") or {}
             key = "prob_short_pct" if side == "SHORT" else "prob_long_pct"
             prob_side = float(ds.get(key, 0) or 0) / 100.0
             score_weak = 0 < prob_side < exit_th
             if _confirm_tick("score_exit", score_weak):
                 log.info(
-                    f"[SCORE-EXIT] {side} tez zayifladi prob=%{prob_side * 100:.1f} "
-                    f"< %{exit_th * 100:.0f} ({_exit_confirm['score_exit']} tick) "
-                    f"aleyhte=%{adverse * 100:.2f} -> erken cik"
+                    f"[SCORE-EXIT] {side} tez GUCLU zayifladi prob=%{prob_side * 100:.1f} "
+                    f"< %{exit_th * 100:.0f} (histerezis, {_exit_confirm['score_exit']} tick) "
+                    f"aleyhte=%{adverse * 100:.2f} -> cik"
                 )
                 _mark_protect_exit()
                 await close_position(reason="score_weak_exit")

@@ -808,7 +808,12 @@ class Config:
     # Runner reversal icin akis-ters ANLAMLI buyukluk esigi (zayif tek-tick etiket degil)
     V3_RUNNER_REV_MIN_CUM = float(os.getenv("V3_RUNNER_REV_MIN_CUM", "2500"))
     # Skor-farkinda erken cikis: prob_side bu esigin altina ARDISIK duserse cik (tez zayif).
+    # NOT: bu esik artik GIRIS tutarlilik kapisi (coherence) icin kullaniliyor.
     V3_SCORE_EXIT_PROB = float(os.getenv("V3_SCORE_EXIT_PROB", "0.55"))
+    # HISTEREZIS cikis esigi: gir >=PROB(%55) ama yalniz prob < HARD(%40) = GUCLU
+    # bozulmada skor-exit. Aradaki band = teze baglilik. %82 erken score_weak_exit'i
+    # ve kar-geri-vermeyi keser; TP1 sonrasi skor-exit zaten devre disi (yapisal yonetir).
+    V3_SCORE_EXIT_HARD_PROB = float(os.getenv("V3_SCORE_EXIT_HARD_PROB", "0.40"))
     # Kanal-fade trend filtresi: guclu ters trendde (15m guc>=esik) fade acma
     V3_CHANNEL_FADE_TREND_FILTER = os.getenv("V3_CHANNEL_FADE_TREND_FILTER", "true").lower() in ("1", "true", "yes")
     V3_CHANNEL_FADE_TREND_STR = float(os.getenv("V3_CHANNEL_FADE_TREND_STR", "80"))

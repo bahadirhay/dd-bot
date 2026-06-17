@@ -351,6 +351,14 @@ def init():
         _migrate_box_log(db)
         _migrate_b_paper(db)
         _migrate_chlong_paper(db)
+        # Orphan temizligi: restart hafizadaki paper pozisyonunu sifirlar, DB satiri
+        # "OPEN" kalir -> net'i bozar. Startup'ta acik paper kayitlarini ORPHAN isaretle
+        # (CLOSED degil -> net hesabina girmez). Gercek para yok, sadece kayit hijyeni.
+        for tbl in ("b_paper", "chlong_paper"):
+            try:
+                db.execute(f"UPDATE {tbl} SET status='ORPHAN' WHERE status='OPEN'")
+            except Exception:
+                pass
     print("DB hazır:", cfg.DB_PATH)
     try:
         n = backfill_closed_trade_metrics()

@@ -350,6 +350,13 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
         paper_tick()
     except Exception:
         pass
+    # Kanal-LONG paper (shadow): destekten donus-long, gercek emir YOK.
+    try:
+        from engine.channel_long_paper import paper_tick as chlong_tick
+
+        chlong_tick()
+    except Exception:
+        pass
     update_levels()
     from engine.market_state_v3 import get_market_state, update_market_state
 

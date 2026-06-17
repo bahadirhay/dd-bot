@@ -72,6 +72,41 @@ def _migrate_box_log(db: sqlite3.Connection) -> None:
     db.execute("CREATE INDEX IF NOT EXISTS idx_box_log_ts ON box_log(ts DESC)")
 
 
+def _migrate_chlong_paper(db: sqlite3.Connection) -> None:
+    """Kanal-long paper (shadow): destekte donus-teyitli LONG — gercek emir YOK."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS chlong_paper (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            open_ts REAL NOT NULL, open_human TEXT, entry REAL, support REAL,
+            close_ts REAL, exit REAL, pnl_bps REAL, reason TEXT, status TEXT DEFAULT 'OPEN'
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_chlong_ts ON chlong_paper(open_ts DESC)")
+
+
+def log_chlong_open(entry: float, support: float) -> int:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            cur = db.execute(
+                "INSERT INTO chlong_paper (open_ts,open_human,entry,support,status) VALUES (?,?,?,?, 'OPEN')",
+                (datetime.now().timestamp(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                 float(entry or 0), float(support or 0)))
+            return int(cur.lastrowid or 0)
+    except Exception:
+        return 0
+
+
+def log_chlong_close(rid: int, exit_px: float, pnl_bps: float, reason: str) -> None:
+    from datetime import datetime
+    try:
+        with _conn() as db:
+            db.execute("UPDATE chlong_paper SET close_ts=?, exit=?, pnl_bps=?, reason=?, status='CLOSED' WHERE id=?",
+                       (datetime.now().timestamp(), float(exit_px or 0), float(pnl_bps or 0), str(reason), int(rid)))
+    except Exception:
+        pass
+
+
 def _migrate_b_paper(db: sqlite3.Connection) -> None:
     """Strateji B paper (shadow) kayitlari — gercek emir YOK, sinyal+sanal PnL izlenir."""
     db.execute("""
@@ -315,6 +350,7 @@ def init():
         _migrate_trades_learning_columns(db)
         _migrate_box_log(db)
         _migrate_b_paper(db)
+        _migrate_chlong_paper(db)
     print("DB hazır:", cfg.DB_PATH)
     try:
         n = backfill_closed_trade_metrics()

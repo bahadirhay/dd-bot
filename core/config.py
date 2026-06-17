@@ -623,6 +623,11 @@ class Config:
     # B PAPER (shadow) modu: gercek emir YOK, sinyal+sanal PnL b_paper tablosuna
     # yazilir (canli sinyal birikimi, risk yok). Acik = topla.
     V3_B_PAPER_LOG = os.getenv("V3_B_PAPER_LOG", "true").lower() in ("1", "true", "yes")
+    # Kanal-LONG paper (shadow): destekten donus-teyitli long — gercek emir YOK, sadece
+    # kayit. Backtest negatif dedi ama canli veride dogrulamak icin. Birkac gun izle.
+    V3_CHLONG_PAPER = os.getenv("V3_CHLONG_PAPER", "true").lower() in ("1", "true", "yes")
+    V3_CHLONG_SL_BPS = float(os.getenv("V3_CHLONG_SL_BPS", "50"))
+    V3_CHLONG_MAXHOLD = int(os.getenv("V3_CHLONG_MAXHOLD", "16"))
     # Reverse (flip) sinyal için min SHORT/LONG olasılık eşiği
     V3_REVERSE_MIN_SCORE_PROB = float(os.getenv("V3_REVERSE_MIN_SCORE_PROB", "55.0"))
     # Swing high fallback için min RR (normal RR'den daha gevşek olabilir)

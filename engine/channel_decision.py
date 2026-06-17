@@ -825,8 +825,19 @@ def decide_channel(
         # Yapi-hizasi kapisi: yapi sert TERS yondeyse o yone fade yapma.
         # Veri: 100 LONG %19 kazandi (ayi yapida destek-long = counter-trend bleed).
         # Trend filtresi sadece guc>=80'i yakaliyor; bu kapi skor farkini yakalar.
+        # TUTARLILIK (16 Haz): bu kapi yalniz TREND'de gecerli. RANGE'de (trend-gucu
+        # < esik) "karsi-trend" diye bir sey yoktur -> struct-align veto'su trend-gucu
+        # kapisiyla CELISIR ve botu tek-yonlu yapar (9/9 short, destekte 438 kez long
+        # bloklandi). Range'de iki kenar da fade edilmeli (LONG@destek +0.11, SHORT@
+        # direnc +0.63 ikisi de kazancli). O yuzden veto yalniz trend-gucu >= esik iken.
+        try:
+            from engine.regime_vr import trend_strength_15m
+            _tstr = trend_strength_15m()
+        except Exception:
+            _tstr = 1.0
+        _is_trend = _tstr >= float(getattr(cfg, "V3_TREND_STR_MAX", 0.35) or 0.35)
         gap_min = float(getattr(cfg, "V3_FADE_STRUCT_ALIGN_GAP", 30) or 0)
-        if gap_min > 0:
+        if gap_min > 0 and _is_trend:
             sL = float(scores.get("structure_long_score") or 0)
             sS = float(scores.get("structure_short_score") or 0)
             opp_lead = (sS - sL) if candidate == "LONG" else (sL - sS)

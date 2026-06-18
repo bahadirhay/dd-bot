@@ -252,6 +252,21 @@ async def _maybe_protective_exit() -> bool:
     entry = float(state.pos_entry or 0)
     if mark <= 0 or entry <= 0 or side not in ("LONG", "SHORT"):
         return False
+    # STRATEJI B CANLI: mean-revert cikis (z-score ortalamaya dondu) — B'nin ASIL cikisi.
+    # SL (60bps) borsada; burasi mean'e donunce kapatir (test edilen full-exit kurgu).
+    if bool(getattr(cfg, "V3_STRATEGY_B_ENABLED", False)):
+        try:
+            from engine.strategy_b_v3 import b_mean_reverted
+
+            if b_mean_reverted(side):
+                from execution.executor import close_position
+
+                log.info(f"[B-LIVE] {side} mean-revert (z=0) — kapat")
+                _mark_protect_exit()
+                await close_position(reason="b_mean_revert")
+                return True
+        except Exception as ex:
+            log.warning(f"[B-LIVE] exit: {ex}")
     adverse = (mark - entry) / entry if side == "SHORT" else (entry - mark) / entry
     try:
         from execution.executor import close_position
@@ -469,7 +484,7 @@ async def execute_entry(details: dict, source: str = "breakout") -> bool:
     # Boyut risk-bazli oldugu icin calc_risk otomatik kuculur. Genis SL RR'yi
     # dusurdugunden RR'yi YENIDEN dogrula -> sub-min-RR setuplar dusurulur
     # (gizli kotu islem yok). "SL gurultude vuruluyor" sorununun cozumu.
-    if details.get("v3_mode") and bool(getattr(cfg, "V3_WIDEN_SL_TO_CAP", True)):
+    if details.get("v3_mode") and details.get("v3_strategy") != "B" and bool(getattr(cfg, "V3_WIDEN_SL_TO_CAP", True)):
         cap = float(getattr(cfg, "V3_HARD_CAP_PCT", 1.5) or 1.5) / 100.0
         e = float(details.get("price") or details.get("signal_price") or px or 0)
         cur_sl = float(details.get("sl") or 0)

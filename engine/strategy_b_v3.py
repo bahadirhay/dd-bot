@@ -207,11 +207,54 @@ def should_exit(side: str, entry_px: float, entry_bar: int, mark: float) -> tupl
 _paper_pos: dict | None = None
 
 
+def build_live_decision() -> dict | None:
+    """B CANLI karar (V3_STRATEGY_B_ENABLED). Test edilen kurgu: stretch>=T giris,
+    SL=60bps, mean-revert cikis (b_mean_reverted). RR>=2 icin tp2=120bps backstop
+    (gercek cikis mean-revert). A KAPALI olur. None = B kapali (A devam eder)."""
+    if not bool(getattr(cfg, "V3_STRATEGY_B_ENABLED", False)):
+        return None
+    if breaker_blocked():
+        return {"action": "WAIT", "reason": "B devre kesici", "details": {}}
+    sig = compute_signal()
+    side = sig.get("signal")
+    if not side:
+        return {"action": "WAIT", "reason": f"B sinyal yok (gerginlik={sig.get('stretch')})",
+                "details": {}}
+    px = float(getattr(state, "mark_price", 0) or getattr(state, "price", 0) or 0)
+    if px <= 0:
+        return {"action": "WAIT", "reason": "fiyat yok", "details": {}}
+    sl_bps = float(getattr(cfg, "V3_B_HARD_SL_BPS", 60) or 60)
+    if side == "LONG":
+        sl = px * (1 - sl_bps / 1e4); tp1 = px * (1 + sl_bps * 1.5 / 1e4); tp2 = px * (1 + sl_bps * 2 / 1e4)
+    else:
+        sl = px * (1 + sl_bps / 1e4); tp1 = px * (1 - sl_bps * 1.5 / 1e4); tp2 = px * (1 - sl_bps * 2 / 1e4)
+    details = {"direction": side, "price": px, "sl": round(sl, 2), "tp1": round(tp1, 2),
+               "tp2": round(tp2, 2), "rr": 2.0, "v3_mode": True, "v3_scenario": "STRATEGY_B",
+               "v3_strategy": "B", "entry_reason": f"STRATEGY_B {side} gerginlik={sig.get('stretch')}"}
+    return {"action": side, "reason": f"B {side} gerginlik={sig.get('stretch')}",
+            "final_decision": side, "details": details, "direction_scores": {}}
+
+
+def b_mean_reverted(side: str) -> bool:
+    """B cikis: fiyat z-score ortalamaya dondu mu (z isaret degistirdi)."""
+    pz_win = int(getattr(cfg, "V3_B_PRICE_Z_WIN", 32) or 32)
+    C = _closes(pz_win + 2)
+    if len(C) < pz_win:
+        return False
+    pz = _zscore(C[-pz_win:])
+    if pz is None:
+        return False
+    return (side == "LONG" and pz >= 0) or (side == "SHORT" and pz <= 0)
+
+
 def paper_tick() -> None:
     """Her karar dongusunde cagrilir. B sinyal verince SANAL pozisyon acar/kapatir
     ve b_paper tablosuna yazar — gercek emir ASLA gondermez. Canli sinyal birikimi
-    icin (gercek para riski yok). V3_B_PAPER_LOG ile acilir."""
+    icin (gercek para riski yok). V3_B_PAPER_LOG ile acilir.
+    NOT: B CANLI ise (V3_STRATEGY_B_ENABLED) paper KAPALI (cift-kayit olmasin)."""
     global _paper_pos
+    if bool(getattr(cfg, "V3_STRATEGY_B_ENABLED", False)):
+        return
     if not bool(getattr(cfg, "V3_B_PAPER_LOG", True)):
         return
     px = float(getattr(state, "mark_price", 0) or getattr(state, "price", 0) or 0)

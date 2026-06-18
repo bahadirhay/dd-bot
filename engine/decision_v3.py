@@ -364,6 +364,18 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
         sb_tick()
     except Exception:
         pass
+    # STRATEJI B CANLI OTORITE: V3_STRATEGY_B_ENABLED ise B karar verir, A KAPALI.
+    # B kendi test edilen kurgusuyla (z-score giris, SL60bps, mean-revert cikis) gercek
+    # emir uretir; cikis trader'da b_mean_reverted ile yonetilir.
+    try:
+        from engine.strategy_b_v3 import build_live_decision
+
+        bdec = build_live_decision()
+        if bdec is not None:
+            state.v3_decision = bdec
+            return bdec
+    except Exception as ex:
+        log.warning(f"[B-LIVE] karar: {ex}")
     update_levels()
     from engine.market_state_v3 import get_market_state, update_market_state
 

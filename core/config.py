@@ -632,6 +632,16 @@ class Config:
     V3_CHLONG_PAPER = os.getenv("V3_CHLONG_PAPER", "true").lower() in ("1", "true", "yes")
     V3_CHLONG_SL_BPS = float(os.getenv("V3_CHLONG_SL_BPS", "50"))
     V3_CHLONG_MAXHOLD = int(os.getenv("V3_CHLONG_MAXHOLD", "16"))
+    # Istatistiksel-bant A paper: z-score MR (swing-kutu yerine mean+-k*sigma).
+    # Backtest: eski A -413 -> +955 (B'yi de gecti). makro sart. gercek emir YOK.
+    V3_STATBAND_PAPER = os.getenv("V3_STATBAND_PAPER", "true").lower() in ("1", "true", "yes")
+    V3_SB_M = int(os.getenv("V3_SB_M", "24"))            # z-score penceresi
+    V3_SB_K = float(os.getenv("V3_SB_K", "2.0"))         # sapma esigi (sigma)
+    V3_SB_MACRO_BPS = float(os.getenv("V3_SB_MACRO_BPS", "150"))
+    V3_SB_SL_BPS = float(os.getenv("V3_SB_SL_BPS", "60"))
+    V3_SB_MAXHOLD = int(os.getenv("V3_SB_MAXHOLD", "16"))
+    V3_SB_RUNNER = os.getenv("V3_SB_RUNNER", "true").lower() in ("1", "true", "yes")
+    V3_SB_RUNNER_TRAIL = float(os.getenv("V3_SB_RUNNER_TRAIL", "30"))
     # Reverse (flip) sinyal için min SHORT/LONG olasılık eşiği
     V3_REVERSE_MIN_SCORE_PROB = float(os.getenv("V3_REVERSE_MIN_SCORE_PROB", "55.0"))
     # Swing high fallback için min RR (normal RR'den daha gevşek olabilir)

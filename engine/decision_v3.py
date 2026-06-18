@@ -357,6 +357,13 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
         chlong_tick()
     except Exception:
         pass
+    # Istatistiksel-bant A paper (shadow): z-score MR, gercek emir YOK.
+    try:
+        from engine.statband_paper import paper_tick as sb_tick
+
+        sb_tick()
+    except Exception:
+        pass
     update_levels()
     from engine.market_state_v3 import get_market_state, update_market_state
 

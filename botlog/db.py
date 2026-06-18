@@ -72,6 +72,41 @@ def _migrate_box_log(db: sqlite3.Connection) -> None:
     db.execute("CREATE INDEX IF NOT EXISTS idx_box_log_ts ON box_log(ts DESC)")
 
 
+def _migrate_statband_paper(db: sqlite3.Connection) -> None:
+    """Istatistiksel-bant A paper (shadow): z-score mean-reversion — gercek emir YOK."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS statband_paper (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            open_ts REAL NOT NULL, open_human TEXT, side TEXT, entry REAL, zscore REAL,
+            close_ts REAL, exit REAL, pnl_bps REAL, reason TEXT, status TEXT DEFAULT 'OPEN'
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_sb_ts ON statband_paper(open_ts DESC)")
+
+
+def log_sb_open(side: str, entry: float, z: float) -> int:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            cur = db.execute(
+                "INSERT INTO statband_paper (open_ts,open_human,side,entry,zscore,status) VALUES (?,?,?,?,?, 'OPEN')",
+                (datetime.now().timestamp(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                 str(side), float(entry or 0), float(z or 0)))
+            return int(cur.lastrowid or 0)
+    except Exception:
+        return 0
+
+
+def log_sb_close(rid: int, exit_px: float, pnl_bps: float, reason: str) -> None:
+    from datetime import datetime
+    try:
+        with _conn() as db:
+            db.execute("UPDATE statband_paper SET close_ts=?, exit=?, pnl_bps=?, reason=?, status='CLOSED' WHERE id=?",
+                       (datetime.now().timestamp(), float(exit_px or 0), float(pnl_bps or 0), str(reason), int(rid)))
+    except Exception:
+        pass
+
+
 def _migrate_chlong_paper(db: sqlite3.Connection) -> None:
     """Kanal-long paper (shadow): destekte donus-teyitli LONG — gercek emir YOK."""
     db.execute("""
@@ -351,10 +386,11 @@ def init():
         _migrate_box_log(db)
         _migrate_b_paper(db)
         _migrate_chlong_paper(db)
+        _migrate_statband_paper(db)
         # Orphan temizligi: restart hafizadaki paper pozisyonunu sifirlar, DB satiri
         # "OPEN" kalir -> net'i bozar. Startup'ta acik paper kayitlarini ORPHAN isaretle
         # (CLOSED degil -> net hesabina girmez). Gercek para yok, sadece kayit hijyeni.
-        for tbl in ("b_paper", "chlong_paper"):
+        for tbl in ("b_paper", "chlong_paper", "statband_paper"):
             try:
                 db.execute(f"UPDATE {tbl} SET status='ORPHAN' WHERE status='OPEN'")
             except Exception:

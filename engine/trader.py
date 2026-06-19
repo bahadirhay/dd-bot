@@ -258,10 +258,20 @@ async def _maybe_protective_exit() -> bool:
         try:
             from engine.strategy_b_v3 import b_mean_reverted
 
-            if b_mean_reverted(side):
-                from execution.executor import close_position
-
-                log.info(f"[B-LIVE] {side} mean-revert (z=0) — kapat")
+            # TP1(runner) vurulduysa B z-exit'i TEKRAR tetiklenmesin — kalan %50 runner
+            # mevcut yapisal-trail + runner SL makinesiyle yonetilir (trend-devamini surer).
+            if not state.pos_tp1_hit and b_mean_reverted(side):
+                runner_on = bool(getattr(cfg, "V3_B_RUNNER_LIVE", True))
+                from execution.executor import (close_partial, close_position,
+                                                schedule_runner_sl_after_tp1)
+                if runner_on and await close_partial(0.5, "b_mean_revert"):
+                    # %50 kar kilitlendi; kalan %50 runner -> mevcut trail/SL yonetir.
+                    state.pos_tp1_hit = True
+                    await schedule_runner_sl_after_tp1()
+                    log.info(f"[B-LIVE] {side} mean-revert — %50 al, kalan RUNNER (trail ile devam)")
+                    return True
+                # runner kapali / kismi basarisiz -> tamamini kapat (eski full-exit)
+                log.info(f"[B-LIVE] {side} mean-revert (z=0) — tamamini kapat")
                 _mark_protect_exit()
                 await close_position(reason="b_mean_revert")
                 return True

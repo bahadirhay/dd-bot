@@ -627,6 +627,9 @@ class Config:
     # Veri: full +866 -> runner +960 (+94bps). trail = peak'ten geri donus esigi.
     V3_B_RUNNER_ENABLED = os.getenv("V3_B_RUNNER_ENABLED", "true").lower() in ("1", "true", "yes")
     V3_B_RUNNER_TRAIL_BPS = float(os.getenv("V3_B_RUNNER_TRAIL_BPS", "30"))
+    # B CANLI runner: mean-revert'te %50 market-kapat, kalan %50 mevcut yapisal-trail/SL
+    # ile runner olarak devam (trend-devamini yakalar). Kapatmak icin false (full-exit).
+    V3_B_RUNNER_LIVE = os.getenv("V3_B_RUNNER_LIVE", "true").lower() in ("1", "true", "yes")
     # Kanal-LONG paper (shadow): destekten donus-teyitli long — gercek emir YOK, sadece
     # kayit. Backtest negatif dedi ama canli veride dogrulamak icin. Birkac gun izle.
     V3_CHLONG_PAPER = os.getenv("V3_CHLONG_PAPER", "true").lower() in ("1", "true", "yes")

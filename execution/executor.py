@@ -820,6 +820,37 @@ async def schedule_runner_sl_after_tp1() -> bool:
     return await move_to_breakeven()
 
 
+async def close_partial(frac: float, reason: str = "partial") -> bool:
+    """Pozisyonun frac kadarini (0<frac<1) reduce-only MARKET ile kapat. Finalize ETMEZ
+    (pozisyon acik kalir). B-runner icin: mean'de %50 al, kalan runner'a devreder.
+    Guvenlik: qty yuvarlama, reduce-only, hata/yetersiz-qty -> False (cagiran full-close
+    fallback yapar). Koruma emirlerini IPTAL ETMEZ (kalan SL'li kalir)."""
+    if is_paper_mode() or not state.in_position:
+        return False
+    if not (0.0 < frac < 1.0):
+        return False
+    try:
+        qty = await get_position_qty()
+        if qty < 0.002:  # bolunemeyecek kadar kucuk
+            return False
+        part = round(qty * frac, 3)
+        if part < 0.001 or (qty - part) < 0.001:
+            return False
+        side = "SELL" if state.pos_side == "LONG" else "BUY"
+        r = await _req("POST", "/fapi/v1/order", {
+            "symbol": cfg.SYMBOL, "side": side, "type": "MARKET",
+            "quantity": part, "reduceOnly": "true", "positionSide": "BOTH"})
+        if not isinstance(r, dict) or r.get("orderId") is None:
+            log.warning(f"[B-RUNNER] kismi kapatma reddedildi: {r}")
+            return False
+        state.pos_qty = round(max(qty - part, 0.0), 4)
+        log.info(f"[B-RUNNER] %{frac*100:.0f} kapatildi ({part} ETH) — kalan {state.pos_qty} runner ({reason})")
+        return True
+    except Exception as ex:
+        log.warning(f"[B-RUNNER] close_partial hata: {ex}")
+        return False
+
+
 async def close_position(reason: str = "signal") -> float:
     if is_paper_mode():
         from execution import paper as _paper

@@ -120,6 +120,12 @@ def finalize_position_closed(
         except Exception as ex:
             log.warning(f"V3 adaptation: {ex}")
 
+        # B canli runner state'ini temizle (borsa-SL/sync ile kapansa bile bayat kalmasin)
+        try:
+            from engine.strategy_b_v3 import runner_clear
+            runner_clear()
+        except Exception:
+            pass
         state.reset_position()
     finally:
         _finalizing = False

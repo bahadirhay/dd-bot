@@ -256,21 +256,30 @@ async def _maybe_protective_exit() -> bool:
     # SL (60bps) borsada; burasi mean'e donunce kapatir (test edilen full-exit kurgu).
     if bool(getattr(cfg, "V3_STRATEGY_B_ENABLED", False)):
         try:
-            from engine.strategy_b_v3 import b_mean_reverted
+            from engine.strategy_b_v3 import (b_mean_reverted, runner_active,
+                                              runner_check, runner_clear, runner_start)
+            from execution.executor import close_partial, close_position
 
-            # TP1(runner) vurulduysa B z-exit'i TEKRAR tetiklenmesin — kalan %50 runner
-            # mevcut yapisal-trail + runner SL makinesiyle yonetilir (trend-devamini surer).
-            if not state.pos_tp1_hit and b_mean_reverted(side):
-                runner_on = bool(getattr(cfg, "V3_B_RUNNER_LIVE", True))
-                from execution.executor import (close_partial, close_position,
-                                                schedule_runner_sl_after_tp1)
-                if runner_on and await close_partial(0.5, "b_mean_revert"):
-                    # %50 kar kilitlendi; kalan %50 runner -> mevcut trail/SL yonetir.
-                    state.pos_tp1_hit = True
-                    await schedule_runner_sl_after_tp1()
-                    log.info(f"[B-LIVE] {side} mean-revert — %50 al, kalan RUNNER (trail ile devam)")
+            sl_bps = float(getattr(cfg, "V3_B_HARD_SL_BPS", 60) or 60)
+            adv_bps = ((mark - entry) if side == "SHORT" else (entry - mark)) / entry * 1e4
+            # 1) RUNNER aktifse: backtest'le BIREBIR — peak'ten V3_B_RUNNER_TRAIL_BPS
+            #    geri donunce (veya SL/maxhold) kalan %50'yi kapat.
+            if runner_active():
+                cl, rsn = runner_check(side, mark)
+                if cl or adv_bps >= sl_bps:
+                    _mark_protect_exit()
+                    await close_position(reason="b_runner_exit")
+                    runner_clear()
+                    log.info(f"[B-LIVE] RUNNER kapandi ({rsn or 'SL'})")
                     return True
-                # runner kapali / kismi basarisiz -> tamamini kapat (eski full-exit)
+                return False  # runner aktif, daha devam
+            # 2) Ilk mean-revert: %50 al (kar kilidi) + runner basla (peak-trail).
+            if b_mean_reverted(side):
+                runner_on = bool(getattr(cfg, "V3_B_RUNNER_LIVE", True))
+                if runner_on and await close_partial(0.5, "b_mean_revert"):
+                    runner_start(side, mark)
+                    log.info(f"[B-LIVE] {side} mean-revert — %50 al, kalan RUNNER (peak-trail)")
+                    return True
                 log.info(f"[B-LIVE] {side} mean-revert (z=0) — tamamini kapat")
                 _mark_protect_exit()
                 await close_position(reason="b_mean_revert")

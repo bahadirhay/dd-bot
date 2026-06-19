@@ -235,6 +235,45 @@ def build_live_decision() -> dict | None:
             "final_decision": side, "details": details, "direction_scores": {}}
 
 
+# --- CANLI runner durumu (backtest ile birebir: peak'ten trail bps geri donus) ---
+_live_runner: dict | None = None
+
+
+def runner_active() -> bool:
+    return _live_runner is not None
+
+
+def runner_start(side: str, px: float) -> None:
+    global _live_runner
+    _live_runner = {"side": side, "peak": px, "bar": _bar_id()}
+
+
+def runner_clear() -> None:
+    global _live_runner
+    _live_runner = None
+
+
+def runner_check(side: str, px: float) -> tuple[bool, str]:
+    """Kalan %50 runner: peak'ten V3_B_RUNNER_TRAIL_BPS geri donunce kapat
+    (backtest'le birebir). maxhold backstop. Donus: (kapat?, sebep)."""
+    global _live_runner
+    if _live_runner is None or px <= 0:
+        return False, ""
+    trail = float(getattr(cfg, "V3_B_RUNNER_TRAIL_BPS", 30) or 30)
+    if side == "LONG":
+        _live_runner["peak"] = max(_live_runner["peak"], px)
+        retr = (_live_runner["peak"] - px) / px * 1e4
+    else:
+        _live_runner["peak"] = min(_live_runner["peak"], px)
+        retr = (px - _live_runner["peak"]) / px * 1e4
+    if retr >= trail:
+        return True, f"runner-trail ({trail:.0f}bps geri donus)"
+    mh = int(getattr(cfg, "V3_B_MAXHOLD_BARS", 16) or 16)
+    if (_bar_id() - _live_runner["bar"]) >= mh * 2:
+        return True, "runner-maxhold"
+    return False, ""
+
+
 def b_mean_reverted(side: str) -> bool:
     """B cikis: fiyat z-score ortalamaya dondu mu (z isaret degistirdi)."""
     pz_win = int(getattr(cfg, "V3_B_PRICE_Z_WIN", 32) or 32)

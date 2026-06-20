@@ -224,17 +224,19 @@ def build_live_decision() -> dict | None:
     if px <= 0:
         return {"action": "WAIT", "reason": "fiyat yok", "details": {}}
     sl_bps = float(getattr(cfg, "V3_B_HARD_SL_BPS", 60) or 60)
-    # TP1/TP2 UZAK backstop (RR>=2 kapisi icin) — B'nin asil kar-almasi DINAMIK mean'de
-    # (close_partial). Sabit TP1 erken doldugunda B'nin mean+trail'iyle CAKISIYORDU
-    # (#227: borsa TP1 90bps doldu -> A-runner devraldi, backtest'le uyusmaz). Cozum:
-    # tp1'i de tp2 yanina (uzak) cek -> erken borsa-partial olmaz, cikis = z-mean+trail.
+    # SL SABIT 60bps (veriyle: vol-olcekli/dinamik SL DAHA KOTU +534 vs sabit +866).
+    # TP1/TP2 ÇOK UZAK (V3_B_TP_FAR_BPS=300) — sadece RR>=2 kapisi + bot-cokme yedegi.
+    # Asil cikis DINAMIK: mean'de %50 (close_partial) + peak-trail runner. Uzak TP runner'i
+    # KESMEZ (trail cok once cikar); islevsel olarak "TP yok", dinamik trail kontrol eder.
+    far = float(getattr(cfg, "V3_B_TP_FAR_BPS", 300) or 300)
     if side == "LONG":
-        sl = px * (1 - sl_bps / 1e4); tp1 = px * (1 + sl_bps * 1.95 / 1e4); tp2 = px * (1 + sl_bps * 2 / 1e4)
+        sl = px * (1 - sl_bps / 1e4); tp1 = px * (1 + far * 0.97 / 1e4); tp2 = px * (1 + far / 1e4)
     else:
-        sl = px * (1 + sl_bps / 1e4); tp1 = px * (1 - sl_bps * 1.95 / 1e4); tp2 = px * (1 - sl_bps * 2 / 1e4)
+        sl = px * (1 + sl_bps / 1e4); tp1 = px * (1 - far * 0.97 / 1e4); tp2 = px * (1 - far / 1e4)
     details = {"direction": side, "price": px, "sl": round(sl, 2), "tp1": round(tp1, 2),
-               "tp2": round(tp2, 2), "rr": 2.0, "v3_mode": True, "v3_scenario": "STRATEGY_B",
-               "v3_strategy": "B", "entry_reason": f"STRATEGY_B {side} gerginlik={sig.get('stretch')}"}
+               "tp2": round(tp2, 2), "rr": round(far / sl_bps, 2), "v3_mode": True,
+               "v3_scenario": "STRATEGY_B", "v3_strategy": "B",
+               "entry_reason": f"STRATEGY_B {side} gerginlik={sig.get('stretch')}"}
     return {"action": side, "reason": f"B {side} gerginlik={sig.get('stretch')}",
             "final_decision": side, "details": details, "direction_scores": {}}
 

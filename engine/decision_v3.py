@@ -364,6 +364,14 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
         sb_tick()
     except Exception:
         pass
+    # 5m mean-reversion paper (shadow): 5m bar z-score MR, gercek emir YOK.
+    # Walk-forward dogrulandi (OOS +794); B(15m) yaninda canli kiyas icin.
+    try:
+        from engine.mr5m_paper import paper_tick as mr5m_tick
+
+        mr5m_tick()
+    except Exception:
+        pass
     # STRATEJI B CANLI OTORITE: V3_STRATEGY_B_ENABLED ise B karar verir, A KAPALI.
     # B kendi test edilen kurgusuyla (z-score giris, SL60bps, mean-revert cikis) gercek
     # emir uretir; cikis trader'da b_mean_reverted ile yonetilir.

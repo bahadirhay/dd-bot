@@ -252,38 +252,27 @@ async def _maybe_protective_exit() -> bool:
     entry = float(state.pos_entry or 0)
     if mark <= 0 or entry <= 0 or side not in ("LONG", "SHORT"):
         return False
-    # STRATEJI B CANLI: mean-revert cikis (z-score ortalamaya dondu) — B'nin ASIL cikisi.
-    # SL (60bps) borsada; burasi mean'e donunce kapatir (test edilen full-exit kurgu).
+    # STRATEJI B CANLI: GERCEK-donus cikis. z-score ortalamaya doner VE pozisyon karda
+    # ise tamamini kapat (kari kilitle). Runner KALDIRILDI — backtest: FULL-close +1197 >
+    # %50+runner +1090, tepe-yakalama %30->%46. Gercek-donus kapisi (kar>=esik) yatay-
+    # surunmede sahte z=0'da ZARARLA kapatmayi onler: z=0 ama zarar ise BEKLE (SL/maxhold).
+    # SL (60bps) borsada; burasi gercek mean-revert'te kapatir.
     if bool(getattr(cfg, "V3_STRATEGY_B_ENABLED", False)):
         try:
-            from engine.strategy_b_v3 import (b_mean_reverted, runner_active,
-                                              runner_check, runner_clear, runner_start)
-            from execution.executor import close_partial, close_position
+            from engine.strategy_b_v3 import b_mean_reverted
+            from execution.executor import close_position
 
-            sl_bps = float(getattr(cfg, "V3_B_HARD_SL_BPS", 60) or 60)
-            adv_bps = ((mark - entry) if side == "SHORT" else (entry - mark)) / entry * 1e4
-            # 1) RUNNER aktifse: backtest'le BIREBIR — peak'ten V3_B_RUNNER_TRAIL_BPS
-            #    geri donunce (veya SL/maxhold) kalan %50'yi kapat.
-            if runner_active():
-                cl, rsn = runner_check(side, mark)
-                if cl or adv_bps >= sl_bps:
-                    _mark_protect_exit()
-                    await close_position(reason="b_runner_exit")
-                    runner_clear()
-                    log.info(f"[B-LIVE] RUNNER kapandi ({rsn or 'SL'})")
-                    return True
-                return False  # runner aktif, daha devam
-            # 2) Ilk mean-revert: %50 al (kar kilidi) + runner basla (peak-trail).
+            cur_bps = ((entry - mark) if side == "SHORT" else (mark - entry)) / entry * 1e4
+            min_prof = float(getattr(cfg, "V3_B_REVERT_MIN_PROFIT_BPS", 0.0) or 0.0)
             if b_mean_reverted(side):
-                runner_on = bool(getattr(cfg, "V3_B_RUNNER_LIVE", True))
-                if runner_on and await close_partial(0.5, "b_mean_revert"):
-                    runner_start(side, mark)
-                    log.info(f"[B-LIVE] {side} mean-revert — %50 al, kalan RUNNER (peak-trail)")
+                if cur_bps >= min_prof:
+                    log.info(f"[B-LIVE] {side} gercek mean-revert (z=0, kar={cur_bps:+.0f}bps) — tamamini kapat")
+                    _mark_protect_exit()
+                    await close_position(reason="b_mean_revert")
                     return True
-                log.info(f"[B-LIVE] {side} mean-revert (z=0) — tamamini kapat")
-                _mark_protect_exit()
-                await close_position(reason="b_mean_revert")
-                return True
+                # sahte z=0 (yatay surunme, pozisyon zararda) -> kapatma, bekle
+                log.info(f"[B-LIVE] {side} z=0 ama zarar ({cur_bps:+.0f}bps) — sahte donus, BEKLE")
+                return False
         except Exception as ex:
             log.warning(f"[B-LIVE] exit: {ex}")
     adverse = (mark - entry) / entry if side == "SHORT" else (entry - mark) / entry

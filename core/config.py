@@ -630,6 +630,10 @@ class Config:
     # B CANLI runner: mean-revert'te %50 market-kapat, kalan %50 mevcut yapisal-trail/SL
     # ile runner olarak devam (trend-devamini yakalar). Kapatmak icin false (full-exit).
     V3_B_RUNNER_LIVE = os.getenv("V3_B_RUNNER_LIVE", "true").lower() in ("1", "true", "yes")
+    # B CIKIS (gercek-donus): mean-revert (z=0) + pozisyon kar>=esik ise %100 kapat.
+    # Backtest: FULL-close +1197 > %50+runner +1090, tepe-yakalama %30->%46. Kapi (kar>=0)
+    # yatay-surunmede sahte z=0'da ZARARLA kapatmayi onler (bedelsiz: +1197 ile birebir).
+    V3_B_REVERT_MIN_PROFIT_BPS = float(os.getenv("V3_B_REVERT_MIN_PROFIT_BPS", "0.0"))
     # Kanal-LONG paper (shadow): destekten donus-teyitli long — gercek emir YOK, sadece
     # kayit. Backtest negatif dedi ama canli veride dogrulamak icin. Birkac gun izle.
     V3_CHLONG_PAPER = os.getenv("V3_CHLONG_PAPER", "true").lower() in ("1", "true", "yes")
@@ -645,6 +649,17 @@ class Config:
     V3_SB_MAXHOLD = int(os.getenv("V3_SB_MAXHOLD", "16"))
     V3_SB_RUNNER = os.getenv("V3_SB_RUNNER", "true").lower() in ("1", "true", "yes")
     V3_SB_RUNNER_TRAIL = float(os.getenv("V3_SB_RUNNER_TRAIL", "30"))
+    # 5m mean-reversion paper (shadow): 5m bar z-score MR — gercek emir YOK.
+    # Walk-forward dogrulandi: M72/K2.0/SL60 net +1186, OOS +794 (B'yi gecti).
+    # 5m'de mean-reversion edge en guclu (autocorr -0.052, islem-basi +8.9bps).
+    V3_MR5M_PAPER = os.getenv("V3_MR5M_PAPER", "true").lower() in ("1", "true", "yes")
+    V3_MR5M_M = int(os.getenv("V3_MR5M_M", "72"))            # z-score penceresi (5m bar = 6h)
+    V3_MR5M_K = float(os.getenv("V3_MR5M_K", "2.0"))         # sapma esigi (sigma)
+    V3_MR5M_MACRO_BPS = float(os.getenv("V3_MR5M_MACRO_BPS", "150"))  # 8h-slope blok
+    V3_MR5M_SL_BPS = float(os.getenv("V3_MR5M_SL_BPS", "60"))
+    V3_MR5M_MAXHOLD = int(os.getenv("V3_MR5M_MAXHOLD", "16"))         # 5m bar = 80dk
+    V3_MR5M_RUNNER = os.getenv("V3_MR5M_RUNNER", "true").lower() in ("1", "true", "yes")
+    V3_MR5M_RUNNER_TRAIL = float(os.getenv("V3_MR5M_RUNNER_TRAIL", "30"))
     # Reverse (flip) sinyal için min SHORT/LONG olasılık eşiği
     V3_REVERSE_MIN_SCORE_PROB = float(os.getenv("V3_REVERSE_MIN_SCORE_PROB", "55.0"))
     # Swing high fallback için min RR (normal RR'den daha gevşek olabilir)

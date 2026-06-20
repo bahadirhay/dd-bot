@@ -107,6 +107,42 @@ def log_sb_close(rid: int, exit_px: float, pnl_bps: float, reason: str) -> None:
         pass
 
 
+def _migrate_mr5m_paper(db: sqlite3.Connection) -> None:
+    """5m mean-reversion paper (shadow): 5m bar z-score MR — gercek emir YOK.
+    Walk-forward dogrulandi (OOS pozitif); B(15m) yaninda canli kiyas icin."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS mr5m_paper (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            open_ts REAL NOT NULL, open_human TEXT, side TEXT, entry REAL, zscore REAL,
+            close_ts REAL, exit REAL, pnl_bps REAL, reason TEXT, status TEXT DEFAULT 'OPEN'
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_mr5m_ts ON mr5m_paper(open_ts DESC)")
+
+
+def log_mr5m_open(side: str, entry: float, z: float) -> int:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            cur = db.execute(
+                "INSERT INTO mr5m_paper (open_ts,open_human,side,entry,zscore,status) VALUES (?,?,?,?,?, 'OPEN')",
+                (datetime.now().timestamp(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                 str(side), float(entry or 0), float(z or 0)))
+            return int(cur.lastrowid or 0)
+    except Exception:
+        return 0
+
+
+def log_mr5m_close(rid: int, exit_px: float, pnl_bps: float, reason: str) -> None:
+    from datetime import datetime
+    try:
+        with _conn() as db:
+            db.execute("UPDATE mr5m_paper SET close_ts=?, exit=?, pnl_bps=?, reason=?, status='CLOSED' WHERE id=?",
+                       (datetime.now().timestamp(), float(exit_px or 0), float(pnl_bps or 0), str(reason), int(rid)))
+    except Exception:
+        pass
+
+
 def _migrate_chlong_paper(db: sqlite3.Connection) -> None:
     """Kanal-long paper (shadow): destekte donus-teyitli LONG — gercek emir YOK."""
     db.execute("""
@@ -387,10 +423,11 @@ def init():
         _migrate_b_paper(db)
         _migrate_chlong_paper(db)
         _migrate_statband_paper(db)
+        _migrate_mr5m_paper(db)
         # Orphan temizligi: restart hafizadaki paper pozisyonunu sifirlar, DB satiri
         # "OPEN" kalir -> net'i bozar. Startup'ta acik paper kayitlarini ORPHAN isaretle
         # (CLOSED degil -> net hesabina girmez). Gercek para yok, sadece kayit hijyeni.
-        for tbl in ("b_paper", "chlong_paper", "statband_paper"):
+        for tbl in ("b_paper", "chlong_paper", "statband_paper", "mr5m_paper"):
             try:
                 db.execute(f"UPDATE {tbl} SET status='ORPHAN' WHERE status='OPEN'")
             except Exception:

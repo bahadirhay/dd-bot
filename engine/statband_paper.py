@@ -63,29 +63,16 @@ def paper_tick() -> None:
             sl = float(getattr(cfg, "V3_SB_SL_BPS", 60) or 60)
             mh = int(getattr(cfg, "V3_SB_MAXHOLD", 16) or 16)
             adverse = ((px - ent) if side == "SHORT" else (ent - px)) / ent * 1e4
-            phase = _pos.get("phase", "open")
-            if phase == "open":
-                reverted = (side == "LONG" and z >= 0) or (side == "SHORT" and z <= 0)
-                if adverse >= sl:
-                    log_sb_close(_pos["id"], px, cur - fee, "hard-SL"); _pos = None
-                elif (_bar_id() - _pos["bar"]) >= mh:
-                    log_sb_close(_pos["id"], px, cur - fee, "maxhold"); _pos = None
-                elif reverted:
-                    # mean'e ulasti: %50 al, kalan runner
-                    if bool(getattr(cfg, "V3_SB_RUNNER", True)):
-                        _pos.update(phase="runner", half=cur, peak=px)
-                    else:
-                        log_sb_close(_pos["id"], px, cur - fee, "ortalamaya donus"); _pos = None
-            else:  # runner trail
-                trail = float(getattr(cfg, "V3_SB_RUNNER_TRAIL", 30) or 30)
-                if side == "LONG":
-                    _pos["peak"] = max(_pos["peak"], px); retr = (_pos["peak"] - px) / ent * 1e4
-                else:
-                    _pos["peak"] = min(_pos["peak"], px); retr = (px - _pos["peak"]) / ent * 1e4
-                if retr >= trail or adverse >= sl or (_bar_id() - _pos["bar"]) >= mh * 2:
-                    blended = 0.5 * _pos["half"] + 0.5 * cur - fee
-                    log_sb_close(_pos["id"], px, blended, "runner-trail")
-                    log.info(f"[SB-PAPER] RUNNER kapandi {side} blended={blended:+.0f}bps"); _pos = None
+            # GERCEK-donus cikis: z=0 VE kar>=esik -> %100 kapat. Runner KALDIRILDI
+            # (backtest: FULL +1197 > runner +1090). Sahte z=0 (zarar) -> bekle.
+            min_prof = float(getattr(cfg, "V3_B_REVERT_MIN_PROFIT_BPS", 0.0) or 0.0)
+            reverted = (side == "LONG" and z >= 0) or (side == "SHORT" and z <= 0)
+            if adverse >= sl:
+                log_sb_close(_pos["id"], px, cur - fee, "hard-SL"); _pos = None
+            elif (_bar_id() - _pos["bar"]) >= mh:
+                log_sb_close(_pos["id"], px, cur - fee, "maxhold"); _pos = None
+            elif reverted and cur >= min_prof:
+                log_sb_close(_pos["id"], px, cur - fee, "gercek-mean-revert"); _pos = None
             return
         # flat: sinyal?
         k = float(getattr(cfg, "V3_SB_K", 2.0) or 2.0)

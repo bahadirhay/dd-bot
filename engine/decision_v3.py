@@ -372,6 +372,14 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
         mr5m_tick()
     except Exception:
         pass
+    # Strateji D: Hacim Profili / POC reversion paper (shadow), gercek emir YOK.
+    # 6GB 8-yaklasim testi KAZANANI (net +1935, OOS +1192); B yaninda canli kiyas.
+    try:
+        from engine.poc_paper import paper_tick as poc_tick
+
+        poc_tick()
+    except Exception:
+        pass
     # STRATEJI B CANLI OTORITE: V3_STRATEGY_B_ENABLED ise B karar verir, A KAPALI.
     # B kendi test edilen kurgusuyla (z-score giris, SL60bps, mean-revert cikis) gercek
     # emir uretir; cikis trader'da b_mean_reverted ile yonetilir.

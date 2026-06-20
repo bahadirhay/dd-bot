@@ -660,6 +660,15 @@ class Config:
     V3_MR5M_MAXHOLD = int(os.getenv("V3_MR5M_MAXHOLD", "16"))         # 5m bar = 80dk
     V3_MR5M_RUNNER = os.getenv("V3_MR5M_RUNNER", "true").lower() in ("1", "true", "yes")
     V3_MR5M_RUNNER_TRAIL = float(os.getenv("V3_MR5M_RUNNER_TRAIL", "30"))
+    # Strateji D: Hacim Profili / POC reversion paper (shadow) — gercek emir YOK.
+    # 6GB 8-yaklasim testi KAZANANI: net +1935, OOS +1192, 3/4 ceyrek (funding+digerlerini gecti).
+    # POC = son M(40) 15m barin hacim-agirlikli ort fiyati; sapma>=DEV_BPS -> fade.
+    V3_POC_PAPER = os.getenv("V3_POC_PAPER", "true").lower() in ("1", "true", "yes")
+    V3_POC_M = int(os.getenv("V3_POC_M", "40"))                  # POC penceresi (15m bar)
+    V3_POC_DEV_BPS = float(os.getenv("V3_POC_DEV_BPS", "50"))    # POC'tan sapma esigi
+    V3_POC_SL_BPS = float(os.getenv("V3_POC_SL_BPS", "60"))
+    V3_POC_MAXHOLD = int(os.getenv("V3_POC_MAXHOLD", "16"))
+    V3_POC_MACRO_BPS = float(os.getenv("V3_POC_MACRO_BPS", "0"))  # 0=kapali (backtest makrosuz +1935)
     # Reverse (flip) sinyal için min SHORT/LONG olasılık eşiği
     V3_REVERSE_MIN_SCORE_PROB = float(os.getenv("V3_REVERSE_MIN_SCORE_PROB", "55.0"))
     # Swing high fallback için min RR (normal RR'den daha gevşek olabilir)

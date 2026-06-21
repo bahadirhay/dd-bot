@@ -155,6 +155,14 @@ def compute_signal() -> dict:
         if (sig == "SHORT" and macro > macro_bps) or (sig == "LONG" and macro < -macro_bps):
             out["macro_block"] = round(macro, 0)
             sig = None
+    # GIRIS-TUTARLILIK kapisi: fiyat-z de yonu teyit etsin. Kompozit (funding agirlikli)
+    # "oversold" derken fiyat zaten ortalamasinda ise, gercek-donus cikisi aninda
+    # tetiklenir -> 0-1 dk churn. coh: fiyat gercekten sapmis olsun. Backtest +1293->+1330.
+    coh = float(getattr(cfg, "V3_B_ENTRY_COH", 0.5) or 0)
+    if sig and coh > 0 and px_z is not None:
+        if (sig == "LONG" and px_z > -coh) or (sig == "SHORT" and px_z < coh):
+            out["coh_block"] = round(px_z, 2)
+            sig = None
     out.update({"ready": True, "stretch": round(stretch, 3), "signal": sig,
                 "px_z": round(px_z, 3) if px_z is not None else None,
                 "parts": {k: round(v, 2) for k, v in parts.items()}})

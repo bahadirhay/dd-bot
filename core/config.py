@@ -634,6 +634,10 @@ class Config:
     # Backtest: FULL-close +1197 > %50+runner +1090, tepe-yakalama %30->%46. Kapi (kar>=0)
     # yatay-surunmede sahte z=0'da ZARARLA kapatmayi onler (bedelsiz: +1197 ile birebir).
     V3_B_REVERT_MIN_PROFIT_BPS = float(os.getenv("V3_B_REVERT_MIN_PROFIT_BPS", "0.0"))
+    # B GIRIS-TUTARLILIK: kompozit sinyalde fiyat-z de yonu teyit etsin (|px_z|>=coh).
+    # Fiyat ortalamasinda iken acilan -> aninda mean-revert cikisi (0-1dk churn) engellenir.
+    # Backtest: net +1293->+1330, 4/4 ceyrek, OOS pozitif. 0=kapali.
+    V3_B_ENTRY_COH = float(os.getenv("V3_B_ENTRY_COH", "0.5"))
     # Kanal-LONG paper (shadow): destekten donus-teyitli long — gercek emir YOK, sadece
     # kayit. Backtest negatif dedi ama canli veride dogrulamak icin. Birkac gun izle.
     V3_CHLONG_PAPER = os.getenv("V3_CHLONG_PAPER", "true").lower() in ("1", "true", "yes")

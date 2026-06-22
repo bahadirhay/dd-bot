@@ -266,14 +266,19 @@ async def _maybe_protective_exit() -> bool:
 
             cur_bps = ((entry - mark) if side == "SHORT" else (mark - entry)) / entry * 1e4
             min_prof = float(getattr(cfg, "V3_B_REVERT_MIN_PROFIT_BPS", 0.0) or 0.0)
-            if poc_mean_reverted(side):
-                if cur_bps >= min_prof:
-                    log.info(f"[D-LIVE] {side} POC-donus (kar={cur_bps:+.0f}bps) — tamamini kapat")
-                    _mark_protect_exit()
-                    await close_position(reason="d_poc_revert")
-                    return True
-                log.info(f"[D-LIVE] {side} POC'ta ama zarar ({cur_bps:+.0f}bps) — sahte donus, BEKLE")
-                return False
+            mh_bars = int(getattr(cfg, "V3_POC_MAXHOLD", 16) or 16)
+            age_bars = (time.time() - float(getattr(state, "pos_open_ts", 0) or 0)) / 900
+            if poc_mean_reverted(side) and cur_bps >= min_prof:
+                log.info(f"[D-LIVE] {side} POC-donus (kar={cur_bps:+.0f}bps) — tamamini kapat")
+                _mark_protect_exit()
+                await close_position(reason="d_poc_revert")
+                return True
+            if age_bars >= mh_bars:  # backtest-birebir: maxhold backstop (kar olmasa da kapat)
+                log.info(f"[D-LIVE] {side} maxhold {mh_bars} bar ({cur_bps:+.0f}bps) — kapat")
+                _mark_protect_exit()
+                await close_position(reason="d_maxhold")
+                return True
+            return False
         except Exception as ex:
             log.warning(f"[D-LIVE] exit: {ex}")
     if bool(getattr(cfg, "V3_STRATEGY_B_ENABLED", False)):
@@ -283,15 +288,20 @@ async def _maybe_protective_exit() -> bool:
 
             cur_bps = ((entry - mark) if side == "SHORT" else (mark - entry)) / entry * 1e4
             min_prof = float(getattr(cfg, "V3_B_REVERT_MIN_PROFIT_BPS", 0.0) or 0.0)
-            if b_mean_reverted(side):
-                if cur_bps >= min_prof:
-                    log.info(f"[B-LIVE] {side} gercek mean-revert (z=0, kar={cur_bps:+.0f}bps) — tamamini kapat")
-                    _mark_protect_exit()
-                    await close_position(reason="b_mean_revert")
-                    return True
-                # sahte z=0 (yatay surunme, pozisyon zararda) -> kapatma, bekle
-                log.info(f"[B-LIVE] {side} z=0 ama zarar ({cur_bps:+.0f}bps) — sahte donus, BEKLE")
-                return False
+            mh_bars = int(getattr(cfg, "V3_B_MAXHOLD_BARS", 16) or 16)
+            age_bars = (time.time() - float(getattr(state, "pos_open_ts", 0) or 0)) / 900
+            if b_mean_reverted(side) and cur_bps >= min_prof:
+                log.info(f"[B-LIVE] {side} gercek mean-revert (z=0, kar={cur_bps:+.0f}bps) — tamamini kapat")
+                _mark_protect_exit()
+                await close_position(reason="b_mean_revert")
+                return True
+            if age_bars >= mh_bars:  # backtest-birebir: maxhold backstop (kar olmasa da kapat)
+                log.info(f"[B-LIVE] {side} maxhold {mh_bars} bar ({cur_bps:+.0f}bps) — kapat")
+                _mark_protect_exit()
+                await close_position(reason="b_maxhold")
+                return True
+            # z=0 ama zarar / sinyal yok -> bekle (SL/maxhold)
+            return False
         except Exception as ex:
             log.warning(f"[B-LIVE] exit: {ex}")
     adverse = (mark - entry) / entry if side == "SHORT" else (entry - mark) / entry

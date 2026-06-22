@@ -114,6 +114,7 @@ def _migrate_d_journal(db: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS d_journal (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ts REAL NOT NULL, human TEXT,
+            strategy TEXT,        -- B | D  (hangi strateji)
             event TEXT,           -- DECISION | ENTRY | EXIT
             signal TEXT,          -- LONG | SHORT | WAIT
             price REAL,           -- niyet/karar fiyati
@@ -124,19 +125,25 @@ def _migrate_d_journal(db: sqlite3.Connection) -> None:
         )
     """)
     db.execute("CREATE INDEX IF NOT EXISTS idx_djournal_ts ON d_journal(ts DESC)")
+    # eski tabloya strategy kolonu ekle (varsa atla)
+    try:
+        db.execute("ALTER TABLE d_journal ADD COLUMN strategy TEXT")
+    except Exception:
+        pass
 
 
 def log_d_journal(event: str, signal: str = "", price: float = 0.0, poc: float = 0.0,
                   dev: float = 0.0, macro_slope: float = 0.0, regime: str = "",
-                  blocked: str = "", reason: str = "", trade_id: int = 0) -> None:
+                  blocked: str = "", reason: str = "", trade_id: int = 0,
+                  strategy: str = "D") -> None:
     from datetime import datetime, timezone
     try:
         with _conn() as db:
             db.execute(
-                "INSERT INTO d_journal (ts,human,event,signal,price,poc,dev,macro_slope,regime,blocked,reason,trade_id)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO d_journal (ts,human,strategy,event,signal,price,poc,dev,macro_slope,regime,blocked,reason,trade_id)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (datetime.now().timestamp(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-                 str(event), str(signal), float(price or 0), float(poc or 0), float(dev or 0),
+                 str(strategy), str(event), str(signal), float(price or 0), float(poc or 0), float(dev or 0),
                  float(macro_slope or 0), str(regime), str(blocked), str(reason), int(trade_id or 0)))
     except Exception:
         pass

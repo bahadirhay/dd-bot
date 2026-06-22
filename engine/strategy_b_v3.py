@@ -36,6 +36,40 @@ _consec_losses = 0
 _cooldown_until_bar = 0
 # 15m bar-kapanis giris kapisi: son giris emri verilen bar (intrabar tekrar girisi onler)
 _last_b_entry_bar = 0
+_last_b_journal_bar = 0  # d_journal: 15m bar basina bir kez B DECISION kaydi
+
+
+def _journal_b(sig: dict, px: float, event: str = "DECISION", trade_id: int = 0) -> None:
+    """B'yi d_journal'a yaz (D ile ayni defter). dev=stretch, blocked=macro/coh."""
+    try:
+        from botlog.db import log_d_journal
+        blk = "macro_block" if sig.get("macro_block") is not None else (
+              "coh_block" if sig.get("coh_block") is not None else "")
+        log_d_journal(event, strategy="B", signal=(sig.get("signal") or "WAIT"), price=px,
+                      dev=float(sig.get("stretch") or 0),
+                      macro_slope=float(sig.get("macro_block") or 0),
+                      regime=str(getattr(state, "regime", "") or ""), blocked=blk,
+                      reason=f"stretch={sig.get('stretch')} parts={sig.get('parts')}",
+                      trade_id=int(trade_id or 0))
+    except Exception:
+        pass
+
+
+def _journal_b_tick() -> None:
+    """Her dongude cagrilir; 15m bar basina bir kez B'nin gordugunu d_journal'a yazar
+    (B paper olsa da kayit tutulur — D ile simetrik)."""
+    global _last_b_journal_bar
+    px = float(getattr(state, "mark_price", 0) or getattr(state, "price", 0) or 0)
+    if px <= 0:
+        return
+    b = _bar_id()
+    if b == _last_b_journal_bar:
+        return
+    sig = compute_signal()
+    if not sig.get("ready"):
+        return
+    _last_b_journal_bar = b
+    _journal_b(sig, px, "DECISION")
 
 
 def _bar_id() -> int:
@@ -257,6 +291,7 @@ def build_live_decision() -> dict | None:
                "tp2": round(tp2, 2), "rr": round(far / sl_bps, 2), "v3_mode": True,
                "v3_scenario": "STRATEGY_B", "v3_strategy": "B",
                "entry_reason": f"STRATEGY_B {side} gerginlik={sig.get('stretch')}"}
+    _journal_b(sig, px, "ENTRY")  # B canli giris niyet-fiyati (slippage join icin)
     return {"action": side, "reason": f"B {side} gerginlik={sig.get('stretch')}",
             "final_decision": side, "details": details, "direction_scores": {}}
 

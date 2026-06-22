@@ -350,6 +350,13 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
         paper_tick()
     except Exception:
         pass
+    # B d_journal: her 15m bar B'nin gordugunu kaydet (B paper olsa da — D ile simetrik).
+    try:
+        from engine.strategy_b_v3 import _journal_b_tick
+
+        _journal_b_tick()
+    except Exception:
+        pass
     # Kanal-LONG paper (shadow): destekten donus-long, gercek emir YOK.
     try:
         from engine.channel_long_paper import paper_tick as chlong_tick

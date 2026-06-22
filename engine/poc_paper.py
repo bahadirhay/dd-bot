@@ -161,6 +161,22 @@ def paper_tick() -> None:
     px = float(getattr(state, "mark_price", 0) or getattr(state, "price", 0) or 0)
     if px <= 0:
         return
+    # D paper d_journal: 15m bar basina bir kez D'nin gordugunu kaydet (D-live ile simetrik)
+    global _last_journal_bar
+    _b = _bar_id()
+    if _b != _last_journal_bar:
+        s = compute_signal()
+        if s.get("ready"):
+            _last_journal_bar = _b
+            try:
+                from botlog.db import log_d_journal
+                log_d_journal("DECISION", strategy="D", signal=(s.get("signal") or "WAIT"),
+                              price=s.get("px") or 0, poc=s.get("poc") or 0, dev=s.get("dev") or 0,
+                              macro_slope=s.get("macro_slope") or 0,
+                              regime=str(getattr(state, "regime", "") or ""),
+                              blocked=s.get("blocked") or "", reason=f"dev={s.get('dev')} (paper)")
+            except Exception:
+                pass
     M = int(getattr(cfg, "V3_POC_M", 40) or 40)
     rows = _bars(M + 100)
     if len(rows) < M + 1:

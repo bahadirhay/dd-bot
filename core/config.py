@@ -638,6 +638,9 @@ class Config:
     # Fiyat ortalamasinda iken acilan -> aninda mean-revert cikisi (0-1dk churn) engellenir.
     # Backtest: net +1293->+1330, 4/4 ceyrek, OOS pozitif. 0=kapali.
     V3_B_ENTRY_COH = float(os.getenv("V3_B_ENTRY_COH", "0.5"))
+    # B 15m BAR-KAPANIS giris: yeni pozisyon 15m bar basina en fazla 1 kez (intrabar YOK).
+    # Slippage testi: 1m-intrabar -64 -> 15m-kapanis +641 (+10.5/islem, slippage-saglam).
+    V3_B_BARCLOSE_ENTRY = os.getenv("V3_B_BARCLOSE_ENTRY", "true").lower() in ("1", "true", "yes")
     # Kanal-LONG paper (shadow): destekten donus-teyitli long — gercek emir YOK, sadece
     # kayit. Backtest negatif dedi ama canli veride dogrulamak icin. Birkac gun izle.
     V3_CHLONG_PAPER = os.getenv("V3_CHLONG_PAPER", "true").lower() in ("1", "true", "yes")

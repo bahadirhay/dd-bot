@@ -34,6 +34,8 @@ _hist_bootstrapped = False
 # Devre kesici + aktif pozisyon takibi
 _consec_losses = 0
 _cooldown_until_bar = 0
+# 15m bar-kapanis giris kapisi: son giris emri verilen bar (intrabar tekrar girisi onler)
+_last_b_entry_bar = 0
 
 
 def _bar_id() -> int:
@@ -231,6 +233,16 @@ def build_live_decision() -> dict | None:
     px = float(getattr(state, "mark_price", 0) or getattr(state, "price", 0) or 0)
     if px <= 0:
         return {"action": "WAIT", "reason": "fiyat yok", "details": {}}
+    # 15m BAR-KAPANIS giris kapisi: yeni pozisyon 15m bar basina EN FAZLA 1 kez (intrabar
+    # giris YOK). Slippage testi: 1m-intrabar B'yi -64'e dusuruyor, 15m-kapanis +641'e
+    # cikariyor (+10.5/islem, slippage-saglam). Asil duzeltme bu — ince 1m kanamasini keser.
+    global _last_b_entry_bar
+    if bool(getattr(cfg, "V3_B_BARCLOSE_ENTRY", True)):
+        cur_bar = _bar_id()
+        if cur_bar == _last_b_entry_bar:
+            return {"action": "WAIT", "reason": "B 15m bar-kapanis bekle (intrabar giris yok)",
+                    "details": {}}
+        _last_b_entry_bar = cur_bar
     sl_bps = float(getattr(cfg, "V3_B_HARD_SL_BPS", 60) or 60)
     # SL SABIT 60bps (veriyle: vol-olcekli/dinamik SL DAHA KOTU +534 vs sabit +866).
     # TP1/TP2 ÇOK UZAK (V3_B_TP_FAR_BPS=300) — sadece RR>=2 kapisi + bot-cokme yedegi.

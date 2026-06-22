@@ -257,6 +257,25 @@ async def _maybe_protective_exit() -> bool:
     # %50+runner +1090, tepe-yakalama %30->%46. Gercek-donus kapisi (kar>=esik) yatay-
     # surunmede sahte z=0'da ZARARLA kapatmayi onler: z=0 ama zarar ise BEKLE (SL/maxhold).
     # SL (60bps) borsada; burasi gercek mean-revert'te kapatir.
+    # STRATEJI D CANLI (oncelikli): POC-donus cikis. Fiyat POC'a doner VE pozisyon karda
+    # ise tamamini kapat. Sahte donus (zarar) -> bekle (SL/maxhold). SL 60bps borsada.
+    if bool(getattr(cfg, "V3_STRATEGY_D_ENABLED", False)):
+        try:
+            from engine.poc_paper import poc_mean_reverted
+            from execution.executor import close_position
+
+            cur_bps = ((entry - mark) if side == "SHORT" else (mark - entry)) / entry * 1e4
+            min_prof = float(getattr(cfg, "V3_B_REVERT_MIN_PROFIT_BPS", 0.0) or 0.0)
+            if poc_mean_reverted(side):
+                if cur_bps >= min_prof:
+                    log.info(f"[D-LIVE] {side} POC-donus (kar={cur_bps:+.0f}bps) — tamamini kapat")
+                    _mark_protect_exit()
+                    await close_position(reason="d_poc_revert")
+                    return True
+                log.info(f"[D-LIVE] {side} POC'ta ama zarar ({cur_bps:+.0f}bps) — sahte donus, BEKLE")
+                return False
+        except Exception as ex:
+            log.warning(f"[D-LIVE] exit: {ex}")
     if bool(getattr(cfg, "V3_STRATEGY_B_ENABLED", False)):
         try:
             from engine.strategy_b_v3 import b_mean_reverted

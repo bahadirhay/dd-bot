@@ -380,6 +380,18 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
         poc_tick()
     except Exception:
         pass
+    # STRATEJI D CANLI OTORITE (oncelikli): V3_STRATEGY_D_ENABLED ise D (POC) karar verir.
+    # POC sapmasi giris, SL60bps, POC-donus cikis (trader'da poc_mean_reverted). Gercek-fee
+    # backtest D 2x B. D acikken B paper'a duser (V3_STRATEGY_B_ENABLED=false olmali).
+    try:
+        from engine.poc_paper import build_live_decision as d_decision
+
+        ddec = d_decision()
+        if ddec is not None:
+            state.v3_decision = ddec
+            return ddec
+    except Exception as ex:
+        log.warning(f"[D-LIVE] karar: {ex}")
     # STRATEJI B CANLI OTORITE: V3_STRATEGY_B_ENABLED ise B karar verir, A KAPALI.
     # B kendi test edilen kurgusuyla (z-score giris, SL60bps, mean-revert cikis) gercek
     # emir uretir; cikis trader'da b_mean_reverted ile yonetilir.

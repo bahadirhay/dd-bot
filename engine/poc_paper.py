@@ -59,10 +59,71 @@ def _poc(rows) -> float:
     return num / den
 
 
+def compute_signal() -> dict:
+    """Donus: {ready, dev, poc, px, signal}. signal: LONG/SHORT/None."""
+    out = {"ready": False, "dev": None, "poc": None, "px": None, "signal": None}
+    px = float(getattr(state, "mark_price", 0) or getattr(state, "price", 0) or 0)
+    if px <= 0:
+        return out
+    M = int(getattr(cfg, "V3_POC_M", 40) or 40)
+    rows = _bars(M + 110)
+    if len(rows) < M + 1:
+        return out
+    poc = _poc(rows[-M:])
+    if poc <= 0:
+        return out
+    dev = (px - poc) / poc * 1e4
+    dev_t = float(getattr(cfg, "V3_POC_DEV_BPS", 50) or 50)
+    sig = "LONG" if dev <= -dev_t else ("SHORT" if dev >= dev_t else None)
+    # makro-yon kapisi (opsiyonel; varsayilan KAPALI, backtest +1935 makrosuz)
+    mac = float(getattr(cfg, "V3_POC_MACRO_BPS", 0) or 0)
+    if sig and mac > 0 and len(rows) > 96 and rows[-97][0] > 0:
+        mc = (rows[-1][0] - rows[-97][0]) / rows[-97][0] * 1e4
+        if (sig == "SHORT" and mc > mac) or (sig == "LONG" and mc < -mac):
+            sig = None
+    out.update({"ready": True, "dev": round(dev, 1), "poc": round(poc, 2), "px": px, "signal": sig})
+    return out
+
+
+def poc_mean_reverted(side: str) -> bool:
+    """POC'a donus: LONG (POC altinda acildi) -> dev>=0 ; SHORT -> dev<=0."""
+    s = compute_signal()
+    if not s.get("ready") or s.get("dev") is None:
+        return False
+    dev = s["dev"]
+    return (side == "LONG" and dev >= 0) or (side == "SHORT" and dev <= 0)
+
+
+def build_live_decision() -> dict | None:
+    """D CANLI karar (V3_STRATEGY_D_ENABLED). POC sapmasi giris, SL=60bps, far-TP
+    (gercek cikis POC-donus + kar>=esik, trader'da). None = D kapali."""
+    if not bool(getattr(cfg, "V3_STRATEGY_D_ENABLED", False)):
+        return None
+    s = compute_signal()
+    side = s.get("signal")
+    if not side:
+        return {"action": "WAIT", "reason": f"D sinyal yok (dev={s.get('dev')})", "details": {}}
+    px = s["px"]
+    sl_bps = float(getattr(cfg, "V3_POC_SL_BPS", 60) or 60)
+    far = float(getattr(cfg, "V3_POC_TP_FAR_BPS", 300) or 300)
+    if side == "LONG":
+        sl = px * (1 - sl_bps / 1e4); tp1 = px * (1 + far * 0.97 / 1e4); tp2 = px * (1 + far / 1e4)
+    else:
+        sl = px * (1 + sl_bps / 1e4); tp1 = px * (1 - far * 0.97 / 1e4); tp2 = px * (1 - far / 1e4)
+    details = {"direction": side, "price": px, "sl": round(sl, 2), "tp1": round(tp1, 2),
+               "tp2": round(tp2, 2), "rr": round(far / sl_bps, 2), "v3_mode": True,
+               "v3_scenario": "STRATEGY_D", "v3_strategy": "D",
+               "entry_reason": f"STRATEGY_D {side} dev={s.get('dev')}"}
+    return {"action": side, "reason": f"D {side} dev={s.get('dev')}",
+            "final_decision": side, "details": details, "direction_scores": {}}
+
+
 def paper_tick() -> None:
     global _pos, _last_bar
     if not bool(getattr(cfg, "V3_POC_PAPER", True)):
         return
+    if bool(getattr(cfg, "V3_STRATEGY_D_ENABLED", False)):
+        return  # D CANLI: gercek emir uretiliyor, paper-shadow kapali
     px = float(getattr(state, "mark_price", 0) or getattr(state, "price", 0) or 0)
     if px <= 0:
         return

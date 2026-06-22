@@ -673,6 +673,10 @@ class Config:
     V3_POC_SL_BPS = float(os.getenv("V3_POC_SL_BPS", "60"))
     V3_POC_MAXHOLD = int(os.getenv("V3_POC_MAXHOLD", "16"))
     V3_POC_MACRO_BPS = float(os.getenv("V3_POC_MACRO_BPS", "0"))  # 0=kapali (backtest makrosuz +1935)
+    # STRATEJI D CANLI: V3_STRATEGY_D_ENABLED=true ise D (POC) gercek emir uretir, B paper'a
+    # cevrilir (V3_STRATEGY_B_ENABLED=false yap). Gercek-fee backtest D 2x B (+2003 vs +994).
+    V3_STRATEGY_D_ENABLED = os.getenv("V3_STRATEGY_D_ENABLED", "false").lower() in ("1", "true", "yes")
+    V3_POC_TP_FAR_BPS = float(os.getenv("V3_POC_TP_FAR_BPS", "300"))  # uzak TP (gercek cikis POC-donus)
     # Reverse (flip) sinyal için min SHORT/LONG olasılık eşiği
     V3_REVERSE_MIN_SCORE_PROB = float(os.getenv("V3_REVERSE_MIN_SCORE_PROB", "55.0"))
     # Swing high fallback için min RR (normal RR'den daha gevşek olabilir)

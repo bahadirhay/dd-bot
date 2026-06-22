@@ -268,14 +268,21 @@ async def _maybe_protective_exit() -> bool:
             min_prof = float(getattr(cfg, "V3_B_REVERT_MIN_PROFIT_BPS", 0.0) or 0.0)
             mh_bars = int(getattr(cfg, "V3_POC_MAXHOLD", 16) or 16)
             age_bars = (time.time() - float(getattr(state, "pos_open_ts", 0) or 0)) / 900
+            def _djx(reason):
+                try:
+                    from botlog.db import log_d_journal, get_open_trade_id
+                    log_d_journal("EXIT", signal=side, price=mark, reason=f"{reason} kar={cur_bps:+.0f}bps",
+                                  trade_id=int(get_open_trade_id() or 0))
+                except Exception:
+                    pass
             if poc_mean_reverted(side) and cur_bps >= min_prof:
                 log.info(f"[D-LIVE] {side} POC-donus (kar={cur_bps:+.0f}bps) — tamamini kapat")
-                _mark_protect_exit()
+                _djx("d_poc_revert"); _mark_protect_exit()
                 await close_position(reason="d_poc_revert")
                 return True
             if age_bars >= mh_bars:  # backtest-birebir: maxhold backstop (kar olmasa da kapat)
                 log.info(f"[D-LIVE] {side} maxhold {mh_bars} bar ({cur_bps:+.0f}bps) — kapat")
-                _mark_protect_exit()
+                _djx("d_maxhold"); _mark_protect_exit()
                 await close_position(reason="d_maxhold")
                 return True
             return False

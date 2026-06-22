@@ -107,6 +107,41 @@ def log_sb_close(rid: int, exit_px: float, pnl_bps: float, reason: str) -> None:
         pass
 
 
+def _migrate_d_journal(db: sqlite3.Connection) -> None:
+    """D (POC) tam kayit defteri: her 15m bar D ne gordu + her giris/cikis.
+    Amac: sonradan 'sunu da kaydetseydik' dememek. dev/poc/makro/regime/neden/niyet-fiyat."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS d_journal (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts REAL NOT NULL, human TEXT,
+            event TEXT,           -- DECISION | ENTRY | EXIT
+            signal TEXT,          -- LONG | SHORT | WAIT
+            price REAL,           -- niyet/karar fiyati
+            poc REAL, dev REAL, macro_slope REAL, regime TEXT,
+            blocked TEXT,         -- macro_block | coh_block | bar_gate | None
+            reason TEXT,
+            trade_id INTEGER      -- ENTRY/EXIT'te ilgili trades.id (join icin)
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_djournal_ts ON d_journal(ts DESC)")
+
+
+def log_d_journal(event: str, signal: str = "", price: float = 0.0, poc: float = 0.0,
+                  dev: float = 0.0, macro_slope: float = 0.0, regime: str = "",
+                  blocked: str = "", reason: str = "", trade_id: int = 0) -> None:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            db.execute(
+                "INSERT INTO d_journal (ts,human,event,signal,price,poc,dev,macro_slope,regime,blocked,reason,trade_id)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (datetime.now().timestamp(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                 str(event), str(signal), float(price or 0), float(poc or 0), float(dev or 0),
+                 float(macro_slope or 0), str(regime), str(blocked), str(reason), int(trade_id or 0)))
+    except Exception:
+        pass
+
+
 def _migrate_mr5m_paper(db: sqlite3.Connection) -> None:
     """5m mean-reversion paper (shadow): 5m bar z-score MR — gercek emir YOK.
     Walk-forward dogrulandi (OOS pozitif); B(15m) yaninda canli kiyas icin."""
@@ -461,6 +496,7 @@ def init():
         _migrate_statband_paper(db)
         _migrate_mr5m_paper(db)
         _migrate_poc_paper(db)
+        _migrate_d_journal(db)
         # Orphan temizligi: restart hafizadaki paper pozisyonunu sifirlar, DB satiri
         # "OPEN" kalir -> net'i bozar. Startup'ta acik paper kayitlarini ORPHAN isaretle
         # (CLOSED degil -> net hesabina girmez). Gercek para yok, sadece kayit hijyeni.

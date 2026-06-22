@@ -25,6 +25,7 @@ log = get_logger("POCPaper")
 _pos: dict | None = None
 _last_bar = 0
 _last_d_entry_bar = 0  # 15m bar-kapanis canli giris kapisi (intrabar tekrar girisi onler)
+_last_journal_bar = 0  # d_journal: 15m bar basina bir kez DECISION kaydi
 
 
 def _bars(limit):
@@ -62,7 +63,8 @@ def _poc(rows) -> float:
 
 def compute_signal() -> dict:
     """Donus: {ready, dev, poc, px, signal}. signal: LONG/SHORT/None."""
-    out = {"ready": False, "dev": None, "poc": None, "px": None, "signal": None}
+    out = {"ready": False, "dev": None, "poc": None, "px": None, "signal": None,
+           "macro_slope": 0.0, "blocked": ""}
     px = float(getattr(state, "mark_price", 0) or getattr(state, "price", 0) or 0)
     if px <= 0:
         return out
@@ -74,15 +76,17 @@ def compute_signal() -> dict:
     if poc <= 0:
         return out
     dev = (px - poc) / poc * 1e4
+    mc = (rows[-1][0] - rows[-97][0]) / rows[-97][0] * 1e4 if (len(rows) > 96 and rows[-97][0] > 0) else 0.0
     dev_t = float(getattr(cfg, "V3_POC_DEV_BPS", 50) or 50)
     sig = "LONG" if dev <= -dev_t else ("SHORT" if dev >= dev_t else None)
+    blocked = ""
     # makro-yon kapisi (opsiyonel; varsayilan KAPALI, backtest +1935 makrosuz)
     mac = float(getattr(cfg, "V3_POC_MACRO_BPS", 0) or 0)
-    if sig and mac > 0 and len(rows) > 96 and rows[-97][0] > 0:
-        mc = (rows[-1][0] - rows[-97][0]) / rows[-97][0] * 1e4
+    if sig and mac > 0 and mc != 0:
         if (sig == "SHORT" and mc > mac) or (sig == "LONG" and mc < -mac):
-            sig = None
-    out.update({"ready": True, "dev": round(dev, 1), "poc": round(poc, 2), "px": px, "signal": sig})
+            blocked = "macro_block"; sig = None
+    out.update({"ready": True, "dev": round(dev, 1), "poc": round(poc, 2), "px": px,
+                "signal": sig, "macro_slope": round(mc, 0), "blocked": blocked})
     return out
 
 
@@ -102,18 +106,38 @@ def build_live_decision() -> dict | None:
         return None
     s = compute_signal()
     side = s.get("signal")
+    # JOURNAL: 15m bar basina bir kez D'nin ne gordugunu kaydet (dev/poc/makro/sinyal/blok).
+    global _last_journal_bar
+    cur_bar = _bar_id()
+    if s.get("ready") and cur_bar != _last_journal_bar:
+        _last_journal_bar = cur_bar
+        try:
+            from botlog.db import log_d_journal
+            regime = str(getattr(state, "regime", "") or "")
+            log_d_journal("DECISION", signal=(side or "WAIT"), price=s.get("px") or 0,
+                          poc=s.get("poc") or 0, dev=s.get("dev") or 0,
+                          macro_slope=s.get("macro_slope") or 0, regime=regime,
+                          blocked=s.get("blocked") or "", reason=f"dev={s.get('dev')}")
+        except Exception:
+            pass
     if not side:
         return {"action": "WAIT", "reason": f"D sinyal yok (dev={s.get('dev')})", "details": {}}
     # 15m BAR-KAPANIS giris kapisi (slippage fix): yeni pozisyon 15m bar basina en fazla 1
     # kez (intrabar YOK). DEV85+15m-kapanis = +1854 (slippage-saglam); 1m intrabar negatif.
     global _last_d_entry_bar
     if bool(getattr(cfg, "V3_B_BARCLOSE_ENTRY", True)):
-        cur_bar = _bar_id()
         if cur_bar == _last_d_entry_bar:
             return {"action": "WAIT", "reason": "D 15m bar-kapanis bekle (intrabar giris yok)",
                     "details": {}}
         _last_d_entry_bar = cur_bar
     px = s["px"]
+    try:
+        from botlog.db import log_d_journal
+        log_d_journal("ENTRY", signal=side, price=px, poc=s.get("poc") or 0, dev=s.get("dev") or 0,
+                      macro_slope=s.get("macro_slope") or 0, regime=str(getattr(state, "regime", "") or ""),
+                      reason=f"D {side} dev={s.get('dev')} (niyet-fiyat)")
+    except Exception:
+        pass
     sl_bps = float(getattr(cfg, "V3_POC_SL_BPS", 60) or 60)
     far = float(getattr(cfg, "V3_POC_TP_FAR_BPS", 300) or 300)
     if side == "LONG":

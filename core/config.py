@@ -672,7 +672,10 @@ class Config:
     # POC = son M(40) 15m barin hacim-agirlikli ort fiyati; sapma>=DEV_BPS -> fade.
     V3_POC_PAPER = os.getenv("V3_POC_PAPER", "true").lower() in ("1", "true", "yes")
     V3_POC_M = int(os.getenv("V3_POC_M", "40"))                  # POC penceresi (15m bar)
-    V3_POC_DEV_BPS = float(os.getenv("V3_POC_DEV_BPS", "50"))    # POC'tan sapma esigi
+    # DEV=85: walk-forward dogrulandi (fee8+slip2, 15m kapanis): net +1854, OOS +731, 4/4
+    # ceyrek, islem-basi +11.7bps (slippage-saglam). DEV50 cok inceydi (slippage'a yenik).
+    # Saglam plato DEV 75-100. Eski +1935/+2003 sisikti (taker-vol + sifir-slippage).
+    V3_POC_DEV_BPS = float(os.getenv("V3_POC_DEV_BPS", "85"))    # POC'tan sapma esigi
     V3_POC_SL_BPS = float(os.getenv("V3_POC_SL_BPS", "60"))
     V3_POC_MAXHOLD = int(os.getenv("V3_POC_MAXHOLD", "16"))
     V3_POC_MACRO_BPS = float(os.getenv("V3_POC_MACRO_BPS", "0"))  # 0=kapali (backtest makrosuz +1935)

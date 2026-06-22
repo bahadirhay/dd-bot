@@ -24,6 +24,7 @@ log = get_logger("POCPaper")
 
 _pos: dict | None = None
 _last_bar = 0
+_last_d_entry_bar = 0  # 15m bar-kapanis canli giris kapisi (intrabar tekrar girisi onler)
 
 
 def _bars(limit):
@@ -103,6 +104,15 @@ def build_live_decision() -> dict | None:
     side = s.get("signal")
     if not side:
         return {"action": "WAIT", "reason": f"D sinyal yok (dev={s.get('dev')})", "details": {}}
+    # 15m BAR-KAPANIS giris kapisi (slippage fix): yeni pozisyon 15m bar basina en fazla 1
+    # kez (intrabar YOK). DEV85+15m-kapanis = +1854 (slippage-saglam); 1m intrabar negatif.
+    global _last_d_entry_bar
+    if bool(getattr(cfg, "V3_B_BARCLOSE_ENTRY", True)):
+        cur_bar = _bar_id()
+        if cur_bar == _last_d_entry_bar:
+            return {"action": "WAIT", "reason": "D 15m bar-kapanis bekle (intrabar giris yok)",
+                    "details": {}}
+        _last_d_entry_bar = cur_bar
     px = s["px"]
     sl_bps = float(getattr(cfg, "V3_POC_SL_BPS", 60) or 60)
     far = float(getattr(cfg, "V3_POC_TP_FAR_BPS", 300) or 300)

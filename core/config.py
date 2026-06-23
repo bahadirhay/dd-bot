@@ -687,6 +687,14 @@ class Config:
     # korumasi; dogrulandi kaybi kazanctan cok azaltir (+1718 vs +1590), olcek icin kritik.
     V3_POC_ER_GATE = float(os.getenv("V3_POC_ER_GATE", "0.50"))  # 0=kapali
     V3_POC_ER_WIN = int(os.getenv("V3_POC_ER_WIN", "20"))
+    # 1h MOMENTUM trend-takip paper (shadow) — gercek emir YOK. Ilk OOS-pozitif trend
+    # yaklasimi (1h, N24/THR150: OOS+418, 4/4). D(range) yaninda trend-ayagi adayi.
+    V3_TMOM_PAPER = os.getenv("V3_TMOM_PAPER", "true").lower() in ("1", "true", "yes")
+    V3_TMOM_N = int(os.getenv("V3_TMOM_N", "24"))           # 1h bar geri-bakis (24h)
+    V3_TMOM_THR = float(os.getenv("V3_TMOM_THR", "150"))    # momentum esigi (bps)
+    V3_TMOM_SL_BPS = float(os.getenv("V3_TMOM_SL_BPS", "120"))
+    V3_TMOM_TRAIL_BPS = float(os.getenv("V3_TMOM_TRAIL_BPS", "80"))  # tepe-trail (kazanani kostur)
+    V3_TMOM_MAXHOLD_H = int(os.getenv("V3_TMOM_MAXHOLD_H", "72"))    # saat
     # Reverse (flip) sinyal için min SHORT/LONG olasılık eşiği
     V3_REVERSE_MIN_SCORE_PROB = float(os.getenv("V3_REVERSE_MIN_SCORE_PROB", "55.0"))
     # Swing high fallback için min RR (normal RR'den daha gevşek olabilir)

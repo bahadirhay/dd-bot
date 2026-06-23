@@ -387,6 +387,14 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
         poc_tick()
     except Exception:
         pass
+    # 1h MOMENTUM trend-takip paper (shadow): ilk OOS-pozitif trend yaklasimi (1h N24).
+    # D(range) yaninda trend-ayagi adayi; iki-bot vizyonu icin canli dogrulama.
+    try:
+        from engine.tmom_paper import paper_tick as tmom_tick
+
+        tmom_tick()
+    except Exception:
+        pass
     # STRATEJI D CANLI OTORITE (oncelikli): V3_STRATEGY_D_ENABLED ise D (POC) karar verir.
     # POC sapmasi giris, SL60bps, POC-donus cikis (trader'da poc_mean_reverted). Gercek-fee
     # backtest D 2x B. D acikken B paper'a duser (V3_STRATEGY_B_ENABLED=false olmali).

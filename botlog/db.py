@@ -149,6 +149,43 @@ def log_d_journal(event: str, signal: str = "", price: float = 0.0, poc: float =
         pass
 
 
+def _migrate_tmom_paper(db: sqlite3.Connection) -> None:
+    """1h momentum trend-takip paper (shadow) — gercek emir YOK. Kullanici: zaman dilimi
+    onemli; 1h momentum (N24/THR150) ilk OOS-pozitif trend yaklasimi (OOS+418, 4/4).
+    D(MR/range) yaninda trend-ayagi adayi; canli kiyas icin. zscore kolonu=momentum bps."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS tmom_paper (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            open_ts REAL NOT NULL, open_human TEXT, side TEXT, entry REAL, zscore REAL,
+            close_ts REAL, exit REAL, pnl_bps REAL, reason TEXT, status TEXT DEFAULT 'OPEN'
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_tmom_ts ON tmom_paper(open_ts DESC)")
+
+
+def log_tmom_open(side: str, entry: float, mom: float) -> int:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            cur = db.execute(
+                "INSERT INTO tmom_paper (open_ts,open_human,side,entry,zscore,status) VALUES (?,?,?,?,?, 'OPEN')",
+                (datetime.now().timestamp(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                 str(side), float(entry or 0), float(mom or 0)))
+            return int(cur.lastrowid or 0)
+    except Exception:
+        return 0
+
+
+def log_tmom_close(rid: int, exit_px: float, pnl_bps: float, reason: str) -> None:
+    from datetime import datetime
+    try:
+        with _conn() as db:
+            db.execute("UPDATE tmom_paper SET close_ts=?, exit=?, pnl_bps=?, reason=?, status='CLOSED' WHERE id=?",
+                       (datetime.now().timestamp(), float(exit_px or 0), float(pnl_bps or 0), str(reason), int(rid)))
+    except Exception:
+        pass
+
+
 def _migrate_mr5m_paper(db: sqlite3.Connection) -> None:
     """5m mean-reversion paper (shadow): 5m bar z-score MR — gercek emir YOK.
     Walk-forward dogrulandi (OOS pozitif); B(15m) yaninda canli kiyas icin."""
@@ -504,10 +541,11 @@ def init():
         _migrate_mr5m_paper(db)
         _migrate_poc_paper(db)
         _migrate_d_journal(db)
+        _migrate_tmom_paper(db)
         # Orphan temizligi: restart hafizadaki paper pozisyonunu sifirlar, DB satiri
         # "OPEN" kalir -> net'i bozar. Startup'ta acik paper kayitlarini ORPHAN isaretle
         # (CLOSED degil -> net hesabina girmez). Gercek para yok, sadece kayit hijyeni.
-        for tbl in ("b_paper", "chlong_paper", "statband_paper", "mr5m_paper", "poc_paper"):
+        for tbl in ("b_paper", "chlong_paper", "statband_paper", "mr5m_paper", "poc_paper", "tmom_paper"):
             try:
                 db.execute(f"UPDATE {tbl} SET status='ORPHAN' WHERE status='OPEN'")
             except Exception:

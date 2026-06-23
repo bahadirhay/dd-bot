@@ -683,6 +683,10 @@ class Config:
     # cevrilir (V3_STRATEGY_B_ENABLED=false yap). Gercek-fee backtest D 2x B (+2003 vs +994).
     V3_STRATEGY_D_ENABLED = os.getenv("V3_STRATEGY_D_ENABLED", "false").lower() in ("1", "true", "yes")
     V3_POC_TP_FAR_BPS = float(os.getenv("V3_POC_TP_FAR_BPS", "300"))  # uzak TP (gercek cikis POC-donus)
+    # D REJIM kapisi (TRENDDE DUR): efficiency-ratio >= esik ise isleme girme. Trend-bleed
+    # korumasi; dogrulandi kaybi kazanctan cok azaltir (+1718 vs +1590), olcek icin kritik.
+    V3_POC_ER_GATE = float(os.getenv("V3_POC_ER_GATE", "0.50"))  # 0=kapali
+    V3_POC_ER_WIN = int(os.getenv("V3_POC_ER_WIN", "20"))
     # Reverse (flip) sinyal için min SHORT/LONG olasılık eşiği
     V3_REVERSE_MIN_SCORE_PROB = float(os.getenv("V3_REVERSE_MIN_SCORE_PROB", "55.0"))
     # Swing high fallback için min RR (normal RR'den daha gevşek olabilir)

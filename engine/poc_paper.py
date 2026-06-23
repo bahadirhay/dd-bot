@@ -80,6 +80,18 @@ def compute_signal() -> dict:
     dev_t = float(getattr(cfg, "V3_POC_DEV_BPS", 50) or 50)
     sig = "LONG" if dev <= -dev_t else ("SHORT" if dev >= dev_t else None)
     blocked = ""
+    # REJIM kapisi (TRENDDE DUR): efficiency-ratio yuksek (trend) ise isleme girme.
+    # Dogrulandi: kaybi kazanctan cok azaltir (trend-bleed korumasi), olcek icin kritik.
+    er_gate = float(getattr(cfg, "V3_POC_ER_GATE", 0.0) or 0.0)
+    if sig and er_gate > 0:
+        N = int(getattr(cfg, "V3_POC_ER_WIN", 20) or 20)
+        cl = [r[0] for r in rows]
+        if len(cl) > N:
+            net = abs(cl[-1] - cl[-1 - N])
+            path = sum(abs(cl[-j] - cl[-j - 1]) for j in range(1, N + 1))
+            er = net / path if path > 0 else 0.0
+            if er >= er_gate:
+                blocked = "er_trend"; sig = None
     # makro-yon kapisi (opsiyonel; varsayilan KAPALI, backtest +1935 makrosuz)
     mac = float(getattr(cfg, "V3_POC_MACRO_BPS", 0) or 0)
     if sig and mac > 0 and mc != 0:

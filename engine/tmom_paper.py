@@ -22,6 +22,21 @@ log = get_logger("TMomPaper")
 
 _pos: dict | None = None
 _last_bar = 0
+_cvd_hist: dict = {}  # 1h bar_id -> cvd_raw (CVD-uyumlu teyit icin)
+
+
+def _cvd_aligned(side: str) -> bool:
+    """CVD trendle ayni yonde mi (son LOOKBACK 1h bar). Backtest: +696->+888, OOS+459."""
+    if not bool(getattr(cfg, "V3_TMOM_CVD_CONFIRM", True)):
+        return True
+    lb = int(getattr(cfg, "V3_TMOM_CVD_LOOKBACK", 6) or 6)
+    cur_bar = _bar_id()
+    cvd_now = _cvd_hist.get(cur_bar)
+    cvd_past = _cvd_hist.get(cur_bar - lb)
+    if cvd_now is None or cvd_past is None:
+        return False  # yeterli CVD gecmisi yok -> teyit edilemez, girme (muhafazakar)
+    cd = cvd_now - cvd_past
+    return (side == "LONG" and cd > 0) or (side == "SHORT" and cd < 0)
 
 
 def _closes_1h(limit):
@@ -48,6 +63,13 @@ def paper_tick() -> None:
     C = _closes_1h(N + 10)
     if len(C) < N + 1:
         return
+    # CVD gecmisi (1h bar basina cvd_raw) — CVD-uyumlu teyit icin
+    cvd = getattr(state, "cvd_raw", None)
+    if cvd is not None:
+        _cvd_hist[_bar_id()] = float(cvd)
+        if len(_cvd_hist) > 60:
+            for kk in sorted(_cvd_hist)[:-60]:
+                _cvd_hist.pop(kk, None)
     fee = 3.0
     try:
         from botlog.db import log_tmom_close, log_tmom_open
@@ -78,6 +100,9 @@ def paper_tick() -> None:
         r = (px - C[-1 - N]) / C[-1 - N] * 1e4   # guncel fiyat vs N saat onceki kapanis
         sig = "LONG" if r > thr else ("SHORT" if r < -thr else None)
         if not sig:
+            return
+        # CVD-uyumlu teyit: CVD trendle ayni yonde degilse girme (whipsaw azaltir, OOS+459)
+        if not _cvd_aligned(sig):
             return
         bid = _bar_id()
         if bid == _last_bar:

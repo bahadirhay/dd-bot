@@ -695,6 +695,10 @@ class Config:
     V3_TMOM_SL_BPS = float(os.getenv("V3_TMOM_SL_BPS", "120"))
     V3_TMOM_TRAIL_BPS = float(os.getenv("V3_TMOM_TRAIL_BPS", "80"))  # tepe-trail (kazanani kostur)
     V3_TMOM_MAXHOLD_H = int(os.getenv("V3_TMOM_MAXHOLD_H", "72"))    # saat
+    # E CVD-uyumlu teyit: CVD trendle ayni yonde degilse girme. Dogrulandi: net +696->+888,
+    # OOS +386->+459, isabet %41->%47, islem 61->38 (whipsaw azalir). order-flow teyidi ISE YARADI.
+    V3_TMOM_CVD_CONFIRM = os.getenv("V3_TMOM_CVD_CONFIRM", "true").lower() in ("1", "true", "yes")
+    V3_TMOM_CVD_LOOKBACK = int(os.getenv("V3_TMOM_CVD_LOOKBACK", "6"))
     # Reverse (flip) sinyal için min SHORT/LONG olasılık eşiği
     V3_REVERSE_MIN_SCORE_PROB = float(os.getenv("V3_REVERSE_MIN_SCORE_PROB", "55.0"))
     # Swing high fallback için min RR (normal RR'den daha gevşek olabilir)

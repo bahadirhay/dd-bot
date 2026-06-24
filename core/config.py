@@ -676,7 +676,9 @@ class Config:
     # ceyrek, islem-basi +11.7bps (slippage-saglam). DEV50 cok inceydi (slippage'a yenik).
     # Saglam plato DEV 75-100. Eski +1935/+2003 sisikti (taker-vol + sifir-slippage).
     V3_POC_DEV_BPS = float(os.getenv("V3_POC_DEV_BPS", "85"))    # POC'tan sapma esigi
-    V3_POC_SL_BPS = float(os.getenv("V3_POC_SL_BPS", "60"))
+    V3_POC_SL_BPS = float(os.getenv("V3_POC_SL_BPS", "90"))  # 60 cok dardi (wick-stop);
+    # SL sweep (fee8+slip2,WF): 60 OOS+235 -> 90 OOS+530 (~2x), isabet %42->%50, 4/4.
+    # Plato 75-90; daha genis SL = az fitil-stop, daha cok trade POC'a ulasir. Kullanici hakli.
     V3_POC_MAXHOLD = int(os.getenv("V3_POC_MAXHOLD", "16"))
     V3_POC_MACRO_BPS = float(os.getenv("V3_POC_MACRO_BPS", "0"))  # 0=kapali (backtest makrosuz +1935)
     # STRATEJI D CANLI: V3_STRATEGY_D_ENABLED=true ise D (POC) gercek emir uretir, B paper'a

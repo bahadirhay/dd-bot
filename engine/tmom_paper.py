@@ -34,7 +34,7 @@ def _cvd_aligned(side: str) -> bool:
     cvd_now = _cvd_hist.get(cur_bar)
     cvd_past = _cvd_hist.get(cur_bar - lb)
     if cvd_now is None or cvd_past is None:
-        return False  # yeterli CVD gecmisi yok -> teyit edilemez, girme (muhafazakar)
+        return True  # CVD gecmisi yok ( or. restart sonrasi) -> ENGELLEME, momentum yeter
     cd = cvd_now - cvd_past
     return (side == "LONG" and cd > 0) or (side == "SHORT" and cd < 0)
 

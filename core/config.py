@@ -701,6 +701,12 @@ class Config:
     # OOS +386->+459, isabet %41->%47, islem 61->38 (whipsaw azalir). order-flow teyidi ISE YARADI.
     V3_TMOM_CVD_CONFIRM = os.getenv("V3_TMOM_CVD_CONFIRM", "true").lower() in ("1", "true", "yes")
     V3_TMOM_CVD_LOOKBACK = int(os.getenv("V3_TMOM_CVD_LOOKBACK", "6"))
+    # Strateji F: GUNLUK time-series-momentum trend-takip paper (shadow) — gercek emir YOK.
+    # BUYUK bulgu: trend ETH'de GUNLUK barda calisir (OOS Sharpe ~1.1, +85%, N=30-90 plato).
+    # D'ye tamamlayici 2. edge. long-short, gunluk kontrol, haftalarca tutus, -%60 DD goze al.
+    V3_FTSM_PAPER = os.getenv("V3_FTSM_PAPER", "true").lower() in ("1", "true", "yes")
+    V3_FTSM_N = int(os.getenv("V3_FTSM_N", "40"))            # gunluk geri-bakis (gun)
+    V3_FTSM_SYMBOL = os.getenv("V3_FTSM_SYMBOL", "ETHUSDT")
     # Reverse (flip) sinyal için min SHORT/LONG olasılık eşiği
     V3_REVERSE_MIN_SCORE_PROB = float(os.getenv("V3_REVERSE_MIN_SCORE_PROB", "55.0"))
     # Swing high fallback için min RR (normal RR'den daha gevşek olabilir)

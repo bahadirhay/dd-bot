@@ -395,6 +395,14 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
         tmom_tick()
     except Exception:
         pass
+    # Strateji F: GUNLUK TSM trend-takip paper (shadow). Walk-forward OOS Sharpe ~1.1 —
+    # trend GUNLUK barda calisir (intraday degil). D'ye tamamlayici 2. edge.
+    try:
+        from engine.daily_tsm_paper import paper_tick as ftsm_tick
+
+        ftsm_tick()
+    except Exception:
+        pass
     # STRATEJI D CANLI OTORITE (oncelikli): V3_STRATEGY_D_ENABLED ise D (POC) karar verir.
     # POC sapmasi giris, SL60bps, POC-donus cikis (trader'da poc_mean_reverted). Gercek-fee
     # backtest D 2x B. D acikken B paper'a duser (V3_STRATEGY_B_ENABLED=false olmali).

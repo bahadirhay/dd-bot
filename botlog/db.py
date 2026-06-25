@@ -107,6 +107,43 @@ def log_sb_close(rid: int, exit_px: float, pnl_bps: float, reason: str) -> None:
         pass
 
 
+def _migrate_ftsm_paper(db: sqlite3.Connection) -> None:
+    """Strateji F: GUNLUK time-series-momentum trend-takip paper (shadow) — gercek emir YOK.
+    BUYUK bulgu: trend ETH'de GUNLUK barda calisir (OOS Sharpe ~1.1, +85%). D'ye tamamlayici
+    2. edge (D=intraday range, F=gunluk trend). long-short, haftalarca tutus, -%60 DD. zscore=momentum%."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS ftsm_paper (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            open_ts REAL NOT NULL, open_human TEXT, side TEXT, entry REAL, zscore REAL,
+            close_ts REAL, exit REAL, pnl_bps REAL, reason TEXT, status TEXT DEFAULT 'OPEN'
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_ftsm_ts ON ftsm_paper(open_ts DESC)")
+
+
+def log_ftsm_open(side: str, entry: float, mom: float) -> int:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            cur = db.execute(
+                "INSERT INTO ftsm_paper (open_ts,open_human,side,entry,zscore,status) VALUES (?,?,?,?,?, 'OPEN')",
+                (datetime.now().timestamp(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                 str(side), float(entry or 0), float(mom or 0)))
+            return int(cur.lastrowid or 0)
+    except Exception:
+        return 0
+
+
+def log_ftsm_close(rid: int, exit_px: float, pnl_bps: float, reason: str) -> None:
+    from datetime import datetime
+    try:
+        with _conn() as db:
+            db.execute("UPDATE ftsm_paper SET close_ts=?, exit=?, pnl_bps=?, reason=?, status='CLOSED' WHERE id=?",
+                       (datetime.now().timestamp(), float(exit_px or 0), float(pnl_bps or 0), str(reason), int(rid)))
+    except Exception:
+        pass
+
+
 def _migrate_d_journal(db: sqlite3.Connection) -> None:
     """D (POC) tam kayit defteri: her 15m bar D ne gordu + her giris/cikis.
     Amac: sonradan 'sunu da kaydetseydik' dememek. dev/poc/makro/regime/neden/niyet-fiyat."""
@@ -542,10 +579,11 @@ def init():
         _migrate_poc_paper(db)
         _migrate_d_journal(db)
         _migrate_tmom_paper(db)
+        _migrate_ftsm_paper(db)
         # Orphan temizligi: restart hafizadaki paper pozisyonunu sifirlar, DB satiri
         # "OPEN" kalir -> net'i bozar. Startup'ta acik paper kayitlarini ORPHAN isaretle
         # (CLOSED degil -> net hesabina girmez). Gercek para yok, sadece kayit hijyeni.
-        for tbl in ("b_paper", "chlong_paper", "statband_paper", "mr5m_paper", "poc_paper", "tmom_paper"):
+        for tbl in ("b_paper", "chlong_paper", "statband_paper", "mr5m_paper", "poc_paper", "tmom_paper", "ftsm_paper"):
             try:
                 db.execute(f"UPDATE {tbl} SET status='ORPHAN' WHERE status='OPEN'")
             except Exception:

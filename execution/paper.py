@@ -262,8 +262,8 @@ async def paper_close(reason: str = "signal") -> float:
         return 0.0
 
     exit_px = state.price or state.mark_price
-    sign = 1 if state.pos_side == "LONG" else -1
-    pnl_close = round((exit_px - state.pos_entry) * state.pos_qty * sign, 4)
+    from core.fees import net_pnl
+    pnl_close = net_pnl(state.pos_entry, exit_px, state.pos_qty, state.pos_side)
     pnl_total = round(_partial_pnl + pnl_close, 4)
     dur_min = round((time.time() - state.pos_open_ts) / 60, 1)
 

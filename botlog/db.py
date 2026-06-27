@@ -746,8 +746,8 @@ def close_all_open_trades(
                 xp = entry
             row_pnl = pnl
             if row_pnl is None and entry > 0 and qty > 0 and xp > 0:
-                sign = 1.0 if side == "LONG" else -1.0
-                row_pnl = round((xp - entry) * qty * sign, 4)
+                from core.fees import net_pnl
+                row_pnl = net_pnl(entry, xp, qty, side)
             else:
                 row_pnl = round(float(row_pnl or 0), 4)
             notional = entry * qty if entry > 0 and qty > 0 else 0.0
@@ -1157,8 +1157,8 @@ def close_orphan_open_trades(reason: str = "orphan_no_position") -> int:
                 xp = entry
             pnl = 0.0
             if entry > 0 and qty > 0 and xp > 0:
-                sign = 1.0 if side == "LONG" else -1.0
-                pnl = round((xp - entry) * qty * sign, 4)
+                from core.fees import net_pnl
+                pnl = net_pnl(entry, xp, qty, side)
             notional = entry * qty if entry > 0 and qty > 0 else 0.0
             pnl_pct = round(pnl / notional * 100, 3) if notional > 0 else 0.0
             open_ts = float(row["open_ts"] or 0)

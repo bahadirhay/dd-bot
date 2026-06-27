@@ -132,6 +132,9 @@ class Config:
     OI_LOOKBACK = 3
     OI_POLL = 10
     TAKER_MIN = 0.60
+    # Binance USDT-M futures taker ucreti (round-trip = giris+cikis). pnl NET kaydi icin.
+    # Varsayilan 0.05% (BNB indirimi yoksa). BNB ile 0.04% -> FEE_RATE_TAKER=0.0004.
+    FEE_RATE_TAKER = float(os.getenv("FEE_RATE_TAKER", "0.0005"))
     ENTRY_TIMEOUT = 5
     # Otomatik trade: trend analizi → pozisyon (paper veya canlı)
     AUTO_TRADE_ENABLED = os.getenv("AUTO_TRADE", "true").lower() in ("1", "true", "yes")

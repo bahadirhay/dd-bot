@@ -923,8 +923,9 @@ async def close_position(reason: str = "signal") -> float:
     exit_px = await _resolve_fill_price(r if isinstance(r, dict) else {}, exit_plan)
     if exit_px <= 0:
         exit_px = float(state.price or state.mark_price or state.pos_entry)
-    sign = 1 if state.pos_side == "LONG" else -1
-    pnl = round((exit_px - state.pos_entry) * state.pos_qty * sign, 4)
+    from core.fees import net_pnl as _net_pnl
+
+    pnl = _net_pnl(state.pos_entry, exit_px, state.pos_qty, state.pos_side)
     dur_min = round((time.time() - state.pos_open_ts) / 60, 1)
 
     log.info(

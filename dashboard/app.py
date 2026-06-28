@@ -198,136 +198,26 @@ app.layout = dbc.Container([
 
     # ── Ana grafik (tam genişlik) ───────────────────────────────
     dbc.Row([
-        dbc.Col(dbc.Card(dbc.CardBody(
+        dbc.Col(dbc.Card(dbc.CardBody([
+            dcc.RadioItems(
+                id="tf-select",
+                options=[
+                    {"label": " 15m", "value": "15m"},
+                    {"label": " 1h", "value": "1h"},
+                ],
+                value="15m",
+                inline=True,
+                style={"fontSize": "12px", "color": C["text"], "marginBottom": "6px"},
+                inputStyle={"marginRight": "4px", "marginLeft": "10px"},
+            ),
             dcc.Graph(
                 id="main-chart",
                 style={"height": "min(82vh, 900px)"},
                 config={"scrollZoom": True, "displayModeBar": True},
             ),
-        ), style={"backgroundColor": C["card"], "border": f"1px solid {C['border']}"}),
+        ]), style={"backgroundColor": C["card"], "border": f"1px solid {C['border']}"}),
         width=12),
     ], className="px-2 mt-2"),
-
-    # ── Piyasa Açıkla (Binance ekran görüntüsü = ana yol) ──
-    dbc.Row([
-        dbc.Col(dbc.Card([
-            dbc.CardHeader("Piyasa Açıkla — Binance grafiğinden", style={
-                **_S, "backgroundColor": C["card"], "borderColor": C["border"],
-            }),
-            dbc.CardBody([
-                html.P(
-                    "Grafiğe tıklayın → «Dashboard grafiğinden açıkla». "
-                    "İsteğe bağlı Binance görseli yükleyebilirsiniz.",
-                    style={**_S, "marginBottom": "12px"},
-                ),
-                html.Div([
-                    html.Span("Claude API anahtarı: ", style=_S),
-                    dcc.Input(
-                        id="claude-api-key-input",
-                        type="password",
-                        placeholder="sk-ant-...",
-                        style={
-                            "width": "340px", "marginRight": "8px",
-                            "backgroundColor": C["bg"], "color": C["text"],
-                            "border": f"1px solid {C['border']}", "padding": "4px 8px",
-                        },
-                    ),
-                    dbc.Button("Kaydet", id="btn-claude-save",
-                               color="success", size="sm", className="me-2"),
-                    html.Span(id="claude-api-status", style={
-                        "fontSize": "11px", "color": C["muted"],
-                    }),
-                ], className="mb-3"),
-                dcc.Upload(
-                    id="explain-upload",
-                    children=html.Div(
-                        "1) Binance ekran görüntüsünü buraya sürükle veya tıkla",
-                        style={"fontSize": "12px", "color": C["blue"], "padding": "14px",
-                               "border": f"2px dashed {C['blue']}", "borderRadius": "6px",
-                               "textAlign": "center", "fontWeight": "bold"},
-                    ),
-                    multiple=False,
-                    style={"marginBottom": "10px"},
-                ),
-                html.Div(id="explain-upload-status", style={"fontSize": "11px", "color": C["muted"],
-                                                            "marginBottom": "8px"}),
-                dbc.Button(
-                    "Dashboard grafiğinden açıkla",
-                    id="btn-explain-chart",
-                    color="primary", size="sm", className="me-2 mb-2",
-                ),
-                dbc.Button(
-                    "Binance görseli (opsiyonel)",
-                    id="btn-explain-screenshot",
-                    color="secondary", size="sm", outline=True, className="me-2 mb-2",
-                ),
-                html.Div([
-                    html.P(
-                        "Saat grafikten otomatik alınır (son kapanan 15m mum). "
-                        "Başka bir mum için üst grafiğe tıklayın; DB kayıtları UTC ile hizalanır.",
-                        style={"fontSize": "11px", "color": C["muted"], "marginBottom": "8px"},
-                    ),
-                    dcc.RadioItems(
-                        id="explain-tz",
-                        options=[
-                            {"label": " Binance saati (Türkiye UTC+3)", "value": "tr"},
-                            {"label": " UTC", "value": "utc"},
-                        ],
-                        value="tr",
-                        inline=True,
-                        style={"fontSize": "11px", "color": C["text"], "marginBottom": "8px"},
-                        inputStyle={"marginRight": "4px"},
-                    ),
-                    html.Div([
-                        html.Span("Seçili mum: ", style=_S),
-                        dcc.Input(
-                            id="explain-datetime",
-                            type="text",
-                            placeholder="otomatik — grafik yüklenince dolar",
-                            debounce=True,
-                            style={
-                                "width": "200px", "marginRight": "8px",
-                                "backgroundColor": C["bg"], "color": C["text"],
-                                "border": f"1px solid {C['border']}", "padding": "4px 8px",
-                            },
-                        ),
-                        html.Span(
-                            "üst grafikte başka mum seçmek için tıklayın",
-                            style={"fontSize": "10px", "color": C["muted"]},
-                        ),
-                    ], className="mb-1"),
-                    html.Div(id="explain-time-sync", style={
-                        "fontSize": "11px", "color": C["blue"],
-                        "marginBottom": "8px", "lineHeight": "1.5",
-                    }),
-                    html.Div([
-                        dbc.Button("Kural ile Açıkla", id="btn-explain-rule",
-                                   color="secondary", size="sm", outline=True, className="me-1"),
-                        dbc.Button("Claude (saat + DB)", id="btn-explain-llm",
-                                   color="secondary", size="sm", outline=True, className="me-1"),
-                        dbc.Button("Grafikten saat oku", id="btn-vision-time",
-                                   color="secondary", size="sm", outline=True),
-                    ], className="mb-2"),
-                ]),
-                dcc.Loading(
-                    html.Pre(
-                        id="explain-output",
-                        style={
-                            "whiteSpace": "pre-wrap", "fontSize": "12px",
-                            "color": C["text"], "maxHeight": "280px",
-                            "overflowY": "auto", "margin": 0,
-                            "backgroundColor": C["bg"], "padding": "10px",
-                            "borderRadius": "4px", "border": f"1px solid {C['border']}",
-                        },
-                    ),
-                    type="dot", color=C["blue"],
-                ),
-            ], style={"padding": "12px"}),
-        ], style={"backgroundColor": C["card"], "border": f"1px solid {C['border']}"}),
-        width=12),
-    ], className="px-2 mt-2"),
-
-    dcc.Store(id="explain-image-path", data=""),
 
     # ── Alt tablolar ──────────────────────────────────────────
     dbc.Row([
@@ -1075,8 +965,9 @@ def _add_breakout_levels(fig, row, col, bars, op=None):
 @app.callback(
     Output("main-chart", "figure"),
     Input("fast", "n_intervals"),
+    Input("tf-select", "value"),
 )
-def update_chart(_):
+def update_chart(_, tf):
     try:
         pkg = get_mtf_package(force=True)
     except Exception as e:
@@ -1100,6 +991,10 @@ def update_chart(_):
     if bars_15m:
         last_lbl = _bar_dt(bars_15m[-1]["ts"]).strftime("%d.%m %H:%M")
 
+    main_bars = bars_1h if tf == "1h" else bars_15m
+    main_lbl = "1h" if tf == "1h" else "15m"
+    main_sec = 3600 if tf == "1h" else 900
+
     fig = make_subplots(
         rows=2, cols=2,
         shared_xaxes=False,
@@ -1109,26 +1004,26 @@ def update_chart(_):
         horizontal_spacing=0.04,
         subplot_titles=("", "", "", ""),
         specs=[
-            [{"type": "candlestick"}, {"type": "candlestick"}],
+            [{"type": "candlestick", "colspan": 2}, None],
             [{"type": "candlestick"}, {"type": "scatter"}],
         ],
     )
 
-    _add_candlestick_trace(fig, bars_15m, 1, 1, "15m")
-    _add_breakout_levels(fig, 1, 1, bars_15m, op=op)
-    _add_candlestick_trace(fig, bars_1h, 1, 2, "1h")
-    lo1h, hi1h = (
-        (min(b["low"] for b in bars_1h), max(b["high"] for b in bars_1h))
-        if bars_1h
+    _add_candlestick_trace(fig, main_bars, 1, 1, main_lbl)
+    if tf != "1h":
+        _add_breakout_levels(fig, 1, 1, bars_15m, op=op)
+    lo_m, hi_m = (
+        (min(b["low"] for b in main_bars), max(b["high"] for b in main_bars))
+        if main_bars
         else (0, 0)
     )
-    if bars_1h:
-        pad1h = max((hi1h - lo1h) * 0.04, 2.0)
+    if main_bars:
+        pad_m = max((hi_m - lo_m) * 0.04, 2.0)
         fig.update_yaxes(
-            range=[lo1h - pad1h, hi1h + pad1h],
+            range=[lo_m - pad_m, hi_m + pad_m],
             tickformat=",.2f",
             row=1,
-            col=2,
+            col=1,
         )
     _add_candlestick_trace(fig, bars_1m, 2, 1, "1m")
     if bars_1m:
@@ -1152,7 +1047,7 @@ def update_chart(_):
     if ser.get("cvd") or hist:
         fig.add_hline(y=0, line_color=C["border"], row=2, col=2)
 
-    if px > 0 and bars_15m:
+    if px > 0 and main_bars:
         fig.add_hline(
             y=px,
             line_dash="dot",
@@ -1168,30 +1063,31 @@ def update_chart(_):
         margin=dict(l=52, r=88, t=56, b=16),
         hovermode="x unified",
         showlegend=False,
+        # Kullanici zoom/pan'i 2sn'lik yenilemeler arasi korunsun (uirevision sabit
+        # kaldikca Plotly etkilesimi tutar). Zaman dilimi degisince (tf) sifirlanir.
+        uirevision=tf,
     )
 
-    xr15 = _x_range(bars_15m, 900)
-    xr1h = _x_range(bars_1h, 3600)
+    xr_main = _x_range(main_bars, main_sec)
     xr1m = _x_range(bars_1m, 60)
+    xr15 = _x_range(bars_15m, 900)
 
-    for r in range(1, 3):
-        for c in range(1, 3):
-            fig.update_yaxes(
-                matches=None,
-                gridcolor=C["border"],
-                tickfont=dict(color=C["muted"], size=9),
-                row=r, col=c,
-            )
-            fig.update_xaxes(
-                gridcolor=C["border"],
-                tickfont=dict(color=C["muted"], size=9),
-                row=r, col=c,
-            )
+    # Eksen stilleri: (1,1) ana grafik, (2,1) 1m, (2,2) CVD — (1,2) colspan ile yok.
+    for r, c in ((1, 1), (2, 1), (2, 2)):
+        fig.update_yaxes(
+            matches=None,
+            gridcolor=C["border"],
+            tickfont=dict(color=C["muted"], size=9),
+            row=r, col=c,
+        )
+        fig.update_xaxes(
+            gridcolor=C["border"],
+            tickfont=dict(color=C["muted"], size=9),
+            row=r, col=c,
+        )
 
-    if xr15:
-        fig.update_xaxes(range=xr15, autorange=False, row=1, col=1)
-    if xr1h:
-        fig.update_xaxes(range=xr1h, autorange=False, row=1, col=2)
+    if xr_main:
+        fig.update_xaxes(range=xr_main, autorange=False, row=1, col=1)
     if xr1m:
         fig.update_xaxes(range=xr1m, autorange=False, row=2, col=1)
     if ser.get("ts") and xr15:
@@ -1431,214 +1327,6 @@ def update_tables(_):
         ne_widget = html.Div("Veri yok", style={"fontSize":"12px","color":C["muted"]})
 
     return trade_widget, ne_widget
-
-
-# ── Piyasa Açıkla ─────────────────────────────────────────────
-
-@app.callback(
-    Output("claude-api-status", "children"),
-    Input("btn-claude-save", "n_clicks"),
-    State("claude-api-key-input", "value"),
-    prevent_initial_call=False,
-)
-def claude_save_key(n_clicks, key_value):
-    from engine.claude_credentials import set_key, status_text
-    if callback_context.triggered_id == "btn-claude-save" and n_clicks and key_value:
-        set_key(key_value)
-        return "Anahtar kaydedildi (data/claude_key.txt — git'e eklenmez)."
-    return status_text()
-
-
-def _click_x_to_ts(x) -> float:
-    if x is None:
-        raise ValueError("tıklama yok")
-    if isinstance(x, (int, float)):
-        sec = x / 1000.0 if x > 1e12 else float(x)
-        return sec
-    s = str(x).replace("Z", "+00:00")
-    try:
-        dt = datetime.fromisoformat(s)
-    except ValueError:
-        dt = datetime.strptime(s[:16], "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.timestamp()
-
-
-def _ts_to_input(ts: float, tz_mode: str) -> str:
-    from engine.time_align import utc_to_binance_local, snap_15m_open
-    ts = snap_15m_open(ts)
-    if tz_mode == "utc":
-        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
-    return utc_to_binance_local(ts).strftime("%Y-%m-%d %H:%M")
-
-
-@app.callback(
-    Output("explain-time-sync", "children"),
-    Input("explain-datetime", "value"),
-    Input("explain-tz", "value"),
-    prevent_initial_call=False,
-)
-def explain_time_sync_preview(when, tz_mode):
-    try:
-        from engine.explain_live import resolve_explain_when
-        from engine.time_align import format_time_sync_line
-        from engine.explain_context import _nearest_snapshot_human
-
-        display, ts, meta = resolve_explain_when(when, tz_mode or "tr")
-        db_near = _nearest_snapshot_human(ts)
-        prefix = "Otomatik (grafik)" if meta.get("auto") else "Seçili"
-        meta["sync_line"] = format_time_sync_line(meta, db_near)
-        return f"{prefix}: {display} — {meta['sync_line']}"
-    except ValueError as e:
-        return f"Saat hatası: {e}"
-
-
-@app.callback(
-    Output("explain-datetime", "value", allow_duplicate=True),
-    Input("fast", "n_intervals"),
-    Input("explain-tz", "value"),
-    State("explain-datetime", "value"),
-    prevent_initial_call="initial_duplicate",
-)
-def auto_fill_explain_time(_n, tz_mode, current):
-    """Grafik yenilenince saat alanını doldur; kullanıcı tıklamışsa dokunma."""
-    if current and str(current).strip():
-        raise dash.exceptions.PreventUpdate
-    from engine.explain_live import resolve_explain_when
-    display, _, _ = resolve_explain_when(None, tz_mode or "tr")
-    return display
-
-
-@app.callback(
-    Output("explain-datetime", "value"),
-    Input("main-chart", "clickData"),
-    State("explain-tz", "value"),
-    prevent_initial_call=True,
-)
-def chart_pick_time(click, tz_mode):
-    if not click or not click.get("points"):
-        raise dash.exceptions.PreventUpdate
-    try:
-        ts = _click_x_to_ts(click["points"][0].get("x"))
-        return _ts_to_input(ts, tz_mode or "tr")
-    except Exception:
-        raise dash.exceptions.PreventUpdate
-
-
-@app.callback(
-    Output("explain-image-path", "data"),
-    Output("explain-upload-status", "children"),
-    Input("explain-upload", "contents"),
-    State("explain-upload", "filename"),
-    prevent_initial_call=True,
-)
-def explain_save_upload(contents, filename):
-    if not contents:
-        raise dash.exceptions.PreventUpdate
-    from engine.explain_llm import save_upload
-    path = save_upload(contents, filename or "chart.png")
-    return path, (
-        f"Yüklendi: {filename or 'chart.png'} — "
-        "şimdi «Binance görselinden açıkla» butonuna basın"
-    )
-
-
-@app.callback(
-    Output("explain-datetime", "value", allow_duplicate=True),
-    Output("explain-upload-status", "children", allow_duplicate=True),
-    Input("btn-vision-time", "n_clicks"),
-    State("explain-image-path", "data"),
-    State("claude-api-key-input", "value"),
-    State("explain-tz", "value"),
-    prevent_initial_call=True,
-)
-def explain_vision_time(_n, img_path, api_key, tz_mode):
-    if not img_path:
-        return dash.no_update, "Önce ekran görüntüsü yükleyin."
-    from engine.explain_llm import vision_guess_time
-    guessed = vision_guess_time(img_path, api_key=api_key)
-    if guessed.startswith("Claude API") or guessed.startswith("Vision hata"):
-        return dash.no_update, guessed
-    from engine.time_align import parse_when
-    clean_utc = guessed.replace(" UTC", "").strip()
-    try:
-        _, meta = parse_when(clean_utc, "utc")
-        display = (
-            meta["tr_human"].replace(" (Binance TR)", "")
-            if (tz_mode or "tr") == "tr"
-            else meta["utc_human"].replace(" UTC", "")
-        )
-        return display, f"Görselden okundu → {meta['sync_line']}"
-    except ValueError:
-        return clean_utc, f"Grafikten okunan: {guessed}"
-
-
-@app.callback(
-    Output("explain-output", "children"),
-    Output("explain-datetime", "value", allow_duplicate=True),
-    Input("btn-explain-chart", "n_clicks"),
-    Input("btn-explain-screenshot", "n_clicks"),
-    Input("btn-explain-rule", "n_clicks"),
-    Input("btn-explain-llm", "n_clicks"),
-    State("explain-datetime", "value"),
-    State("explain-image-path", "data"),
-    State("claude-api-key-input", "value"),
-    State("explain-tz", "value"),
-    prevent_initial_call=True,
-)
-def explain_run(_nc, _ns, _nr, _nl, when, img_path, api_key, tz_mode):
-    tz = tz_mode or "tr"
-    trig = callback_context.triggered_id
-    try:
-        from engine.explain_context import build_context, format_rule_report
-        from engine.explain_live import build_dashboard_context, explain_from_dashboard_chart
-        from engine.explain_llm import (
-            explain_from_binance_screenshot,
-            explain_narrative,
-            vision_chart_bias,
-        )
-
-        def _ctx_with_visual(when_val: str, img: str | None):
-            c = build_dashboard_context(when_val, tz_mode=tz)
-            if not c.get("ok"):
-                c = build_context(when_val, tz_mode=tz)
-            if img:
-                v = vision_chart_bias(img, api_key=api_key)
-                if v.get("ok"):
-                    c["visual"] = v
-            return c
-
-        if trig == "btn-explain-chart":
-            from engine.explain_live import resolve_explain_when
-            use_when, _, _ = resolve_explain_when(when, tz)
-            return explain_from_dashboard_chart(use_when, tz_mode=tz), use_when
-
-        if trig == "btn-explain-screenshot":
-            if not img_path:
-                return "Önce Binance ekran görüntüsünü yükleyin.", dash.no_update
-            report, used_when = explain_from_binance_screenshot(
-                img_path, api_key=api_key, tz_mode=tz
-            )
-            if used_when:
-                return report, used_when
-            return report, dash.no_update
-
-        from engine.explain_live import resolve_explain_when
-        use_when, _, _ = resolve_explain_when(when, tz)
-        ctx = _ctx_with_visual(use_when, img_path)
-        if trig == "btn-explain-llm":
-            return (
-                explain_narrative(
-                    use_when, img_path or None, api_key=api_key, ctx=ctx, tz_mode=tz
-                ),
-                use_when,
-            )
-        return format_rule_report(ctx), use_when
-    except ValueError as e:
-        return str(e), dash.no_update
-    except Exception as e:
-        return f"Hata: {e}", dash.no_update
 
 
 def run(host="0.0.0.0", port=8050, debug=False):

@@ -134,6 +134,20 @@ def log_ftsm_open(side: str, entry: float, mom: float) -> int:
         return 0
 
 
+def get_open_ftsm() -> dict | None:
+    """Acik (OPEN) ftsm_paper satiri — restart'ta F pozisyonunu geri yuklemek icin."""
+    try:
+        with _conn() as db:
+            row = db.execute(
+                "SELECT id, side, entry FROM ftsm_paper WHERE status='OPEN' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        if row:
+            return {"id": int(row["id"]), "side": str(row["side"]), "entry": float(row["entry"] or 0)}
+    except Exception:
+        pass
+    return None
+
+
 def log_ftsm_close(rid: int, exit_px: float, pnl_bps: float, reason: str) -> None:
     from datetime import datetime
     try:
@@ -583,7 +597,9 @@ def init():
         # Orphan temizligi: restart hafizadaki paper pozisyonunu sifirlar, DB satiri
         # "OPEN" kalir -> net'i bozar. Startup'ta acik paper kayitlarini ORPHAN isaretle
         # (CLOSED degil -> net hesabina girmez). Gercek para yok, sadece kayit hijyeni.
-        for tbl in ("b_paper", "chlong_paper", "statband_paper", "mr5m_paper", "poc_paper", "tmom_paper", "ftsm_paper"):
+        # NOT: ftsm_paper (Strateji F) HARIC — gunluk trend, cok-gunluk tutus. Acik satir
+        # mesru; restart'ta orphan'lanmaz, paper_tick startup'ta _pos'u geri yukler.
+        for tbl in ("b_paper", "chlong_paper", "statband_paper", "mr5m_paper", "poc_paper", "tmom_paper"):
             try:
                 db.execute(f"UPDATE {tbl} SET status='ORPHAN' WHERE status='OPEN'")
             except Exception:

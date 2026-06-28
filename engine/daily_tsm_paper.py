@@ -24,12 +24,34 @@ from core.state import state
 log = get_logger("DailyTSM")
 
 _pos: dict | None = None
+_restored = False
 _last_day = 0
 _closes_cache: tuple[int, list] = (0, [])
 
 
 def _bar_id() -> int:
     return int(time.time() // 86400)  # gunluk
+
+
+def _restore_pos() -> None:
+    """Restart sonrasi acik F pozisyonunu DB'den geri yukle (cok-gunluk tutus).
+    F gunluk trend — restart pozisyonu sifirlamamali, yoksa her restart kari siler."""
+    global _pos, _restored
+    if _restored:
+        return
+    _restored = True
+    try:
+        from botlog.db import get_open_ftsm
+
+        row = get_open_ftsm()
+        if row:
+            _pos = {"id": row["id"], "side": row["side"], "entry": row["entry"]}
+            log.info(
+                f"[F-TSM] acik pozisyon geri yuklendi: {row['side']} @{row['entry']:.1f} "
+                f"(id={row['id']}) — restart'ta sifirlanmadi"
+            )
+    except Exception as ex:
+        log.warning(f"[F-TSM] restore: {ex}")
 
 
 def _daily_closes(sym: str, limit: int = 200) -> list:
@@ -54,6 +76,7 @@ def paper_tick() -> None:
     global _pos, _last_day
     if not bool(getattr(cfg, "V3_FTSM_PAPER", True)):
         return
+    _restore_pos()  # restart sonrasi acik pozisyonu bir kez geri yukle
     day = _bar_id()
     if day == _last_day:
         return  # gunde 1 kez

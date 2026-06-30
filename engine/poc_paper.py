@@ -134,31 +134,21 @@ def build_live_decision() -> dict | None:
             pass
     if not side:
         return {"action": "WAIT", "reason": f"D sinyal yok (dev={s.get('dev')})", "details": {}}
-    # 15m BAR-KAPANIS giris kapisi (slippage fix): yeni pozisyon 15m bar basina en fazla 1
-    # kez (intrabar YOK). DEV85+15m-kapanis = +1854 (slippage-saglam); 1m intrabar negatif.
-    global _last_d_entry_bar
-    if bool(getattr(cfg, "V3_B_BARCLOSE_ENTRY", True)):
-        if cur_bar == _last_d_entry_bar:
-            # TESHIS: bu barda gecerli sinyal var ama kapi zaten tuketilmis. Eger kapiyi
-            # mum-ici bir 1m tick tukettiyse, 15m-kapanis girisi burada PRE-EMPT olur ->
-            # D sinyal verir ama hic acilmaz. Bu logu gorursen kok-neden budur.
-            log.info(
-                f"[D-DIAG] {side} sinyal VAR (dev={s.get('dev')}) ama _last_d_entry_bar=bu bar "
-                f"(bar={cur_bar}) -> 15m-kapanis girisi PRE-EMPT, trade ACILMADI. "
-                f"Kapi mum-ici tick'te mi tuketildi?"
-            )
-            return {"action": "WAIT", "reason": "D 15m bar-kapanis bekle (intrabar giris yok)",
-                    "details": {}}
-        _last_d_entry_bar = cur_bar
-        log.info(f"[D-DIAG] {side} kapi ARMED (bar={cur_bar} dev={s.get('dev')}) -> bu cagri execute path'e gidiyor")
+    # D 15m-KAPANIS girisi: karar HER cagrida uretilir (sinyal varken). Gercek emir trader'da
+    # YALNIZ 15m-kapanis yolunda atilir (on_15m_market); 1m intrabar reclaim D'yi atlar ->
+    # "intrabar YOK" boyle saglanir. ESKI self-gate (_last_d_entry_bar) mum-ici 1m tick'te
+    # tukenip 15m-kapanis girisini PRE-EMPT ediyordu (D sinyal verip hic acmiyordu) -> kaldirildi.
     px = s["px"]
-    try:
-        from botlog.db import log_d_journal
-        log_d_journal("ENTRY", signal=side, price=px, poc=s.get("poc") or 0, dev=s.get("dev") or 0,
-                      macro_slope=s.get("macro_slope") or 0, regime=str(getattr(state, "regime", "") or ""),
-                      reason=f"D {side} dev={s.get('dev')} (niyet-fiyat)")
-    except Exception:
-        pass
+    global _last_d_entry_bar
+    if cur_bar != _last_d_entry_bar:  # ENTRY niyet-kaydi: 15m bar basina bir kez (journal)
+        _last_d_entry_bar = cur_bar
+        try:
+            from botlog.db import log_d_journal
+            log_d_journal("ENTRY", signal=side, price=px, poc=s.get("poc") or 0, dev=s.get("dev") or 0,
+                          macro_slope=s.get("macro_slope") or 0, regime=str(getattr(state, "regime", "") or ""),
+                          reason=f"D {side} dev={s.get('dev')} (niyet-fiyat)")
+        except Exception:
+            pass
     sl_bps = float(getattr(cfg, "V3_POC_SL_BPS", 60) or 60)
     far = float(getattr(cfg, "V3_POC_TP_FAR_BPS", 300) or 300)
     if side == "LONG":

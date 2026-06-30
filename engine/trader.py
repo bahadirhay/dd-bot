@@ -816,7 +816,9 @@ async def on_1m_market(candle: dict) -> None:
         # geçtiyse VE fiyat destek/dirençte akış teyidiyle reclaim yaptıysa,
         # 15m kapanışı beklemeden gir (bounce'u kenardan yakala).
         act = str(snap.get("action") or "")
-        if act in ("LONG", "SHORT") and _reclaim_trigger(act, candle):
+        # D (POC) yalniz 15m-kapanis girer (intrabar YOK) -> 1m reclaim yolunu atla.
+        d_barclose_only = str((snap.get("details") or {}).get("v3_strategy") or "") == "D"
+        if act in ("LONG", "SHORT") and not d_barclose_only and _reclaim_trigger(act, candle):
             details = dict(snap.get("details") or {})
             if details:
                 log.info(

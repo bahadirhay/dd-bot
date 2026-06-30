@@ -21,8 +21,11 @@ from core.logger import get_logger
 log = get_logger("PocAtrPaper")
 
 # ETH (cipa, canli D A/B) + cift-olcu (ATR & std) robustluk barini gecen coinler:
-# GLM/AVAX/ARB/INJ her iki olcude + ve >=3/5. SUI/OP elendi (tek-olcu/kirilgan).
-SYMBOLS = ["ETHUSDT", "GLMUSDT", "AVAXUSDT", "ARBUSDT", "INJUSDT"]
+# GLM/AVAX/ARB/INJ her iki olcude + ve >=3/5 (ANA katman). SUI/OP elendi.
+# IZLEME katmani (cift-olcu + ama yalniz 2/5 = rejim-yogun, dusuk-guven): SYN/PYTH.
+# Amac: forward'da ANA katman (>=3/5) izleme katmanini (2/5) geciyor mu -> bari dogrula.
+SYMBOLS = ["ETHUSDT", "GLMUSDT", "AVAXUSDT", "ARBUSDT", "INJUSDT", "SYNUSDT", "PYTHUSDT"]
+WATCH_TIER = {"SYNUSDT", "PYTHUSDT"}  # dusuk-guven (2/5), gozlem; kanitlanmis degil
 M = 40                          # POC penceresi (canli D ile ayni)
 # Vol-normalize: DEV ve SL her coinin KENDI ATR'sinin katlari (ATR=SL boyutlama, sinyal degil).
 # Multipleler ETH'e cipalandi: ETH'te SL~2.5*ATR (en iyi cikan), DEV/SL orani canli D'nin 85/90'i.

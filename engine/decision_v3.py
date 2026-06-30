@@ -387,6 +387,13 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
         poc_tick()
     except Exception:
         pass
+    # D + ATR-uyarlanir SL A/B paper (shadow): canli D (sabit 90) vs SL=2.5*ATR forward kiyas.
+    try:
+        from engine.poc_atr_paper import paper_tick as atr_tick
+
+        atr_tick()
+    except Exception:
+        pass
     # 1h MOMENTUM trend-takip paper (shadow): ilk OOS-pozitif trend yaklasimi (1h N24).
     # D(range) yaninda trend-ayagi adayi; iki-bot vizyonu icin canli dogrulama.
     try:

@@ -107,6 +107,60 @@ def log_sb_close(rid: int, exit_px: float, pnl_bps: float, reason: str) -> None:
         pass
 
 
+def _migrate_atr_paper(db: sqlite3.Connection) -> None:
+    """D + ATR-uyarlanir SL A/B paper (shadow) — gercek emir YOK. Giris canli D ile AYNI
+    (POC dev85); fark yalniz SL = m*ATR (sabit 90 yerine). ETH'te ATR x2.5 sabiti gecmisti
+    (forward dogrulama). symbol kolonu: ileride coin eklenebilir. zscore=dev_bps."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS poc_atr_paper (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            open_ts REAL NOT NULL, open_human TEXT, symbol TEXT, side TEXT, entry REAL,
+            zscore REAL, sl REAL, close_ts REAL, exit REAL, pnl_bps REAL, reason TEXT,
+            status TEXT DEFAULT 'OPEN'
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_atr_ts ON poc_atr_paper(open_ts DESC)")
+
+
+def log_atr_open(symbol: str, side: str, entry: float, dev: float, sl: float) -> int:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            cur = db.execute(
+                "INSERT INTO poc_atr_paper (open_ts,open_human,symbol,side,entry,zscore,sl,status) "
+                "VALUES (?,?,?,?,?,?,?, 'OPEN')",
+                (datetime.now().timestamp(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                 str(symbol), str(side), float(entry or 0), float(dev or 0), float(sl or 0)))
+            return int(cur.lastrowid or 0)
+    except Exception:
+        return 0
+
+
+def log_atr_close(rid: int, exit_px: float, pnl_bps: float, reason: str) -> None:
+    from datetime import datetime
+    try:
+        with _conn() as db:
+            db.execute("UPDATE poc_atr_paper SET close_ts=?, exit=?, pnl_bps=?, reason=?, status='CLOSED' WHERE id=?",
+                       (datetime.now().timestamp(), float(exit_px or 0), float(pnl_bps or 0), str(reason), int(rid)))
+    except Exception:
+        pass
+
+
+def get_open_atr(symbol: str) -> dict | None:
+    """Acik poc_atr_paper satiri (symbol bazli) — restart restore icin."""
+    try:
+        with _conn() as db:
+            row = db.execute(
+                "SELECT id, side, entry, sl FROM poc_atr_paper WHERE status='OPEN' AND symbol=? "
+                "ORDER BY id DESC LIMIT 1", (str(symbol),)).fetchone()
+        if row:
+            return {"id": int(row["id"]), "side": str(row["side"]),
+                    "entry": float(row["entry"] or 0), "sl": float(row["sl"] or 0)}
+    except Exception:
+        pass
+    return None
+
+
 def _migrate_ftsm_paper(db: sqlite3.Connection) -> None:
     """Strateji F: GUNLUK time-series-momentum trend-takip paper (shadow) — gercek emir YOK.
     BUYUK bulgu: trend ETH'de GUNLUK barda calisir (OOS Sharpe ~1.1, +85%). D'ye tamamlayici
@@ -594,6 +648,7 @@ def init():
         _migrate_d_journal(db)
         _migrate_tmom_paper(db)
         _migrate_ftsm_paper(db)
+        _migrate_atr_paper(db)
         # Orphan temizligi: restart hafizadaki paper pozisyonunu sifirlar, DB satiri
         # "OPEN" kalir -> net'i bozar. Startup'ta acik paper kayitlarini ORPHAN isaretle
         # (CLOSED degil -> net hesabina girmez). Gercek para yok, sadece kayit hijyeni.

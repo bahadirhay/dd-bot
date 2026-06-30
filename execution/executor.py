@@ -203,11 +203,46 @@ async def _resolve_fill_price(order: dict, plan: Plan) -> float:
             if executed > 0 and cum > 0:
                 return round(cum / executed, 2)
 
-    fallback = float(plan.entry or 0)
-    if fallback > 0:
-        return fallback
+    # Dolum fiyati cozulemedi. CIKISTA plan.entry'ye dusmek exit=entry -> sahte sifir-hareket
+    # PnL uretir (Binance gercek dolumuyla tutmaz, orn #268). Once canli piyasa fiyatini kullan
+    # (market emir dolumunun yakini); plan.entry yalniz son care.
     px = state.mark_price or state.price or state.bid or state.ask
-    return float(px) if px and px > 0 else 0.0
+    if px and float(px) > 0:
+        return float(px)
+    return float(plan.entry or 0)
+
+
+async def fetch_realized_pnl_since(open_ts: float) -> float | None:
+    """Borsadan GERCEK net realized PnL (REALIZED_PNL + COMMISSION + FUNDING_FEE),
+    open_ts'ten beri SYMBOL icin. Yerel hesap yerine Binance ile birebir tutar.
+    None = income gelmedi (cagiran yerel hesaba duser). Income biraz gecikebilir -> kisa retry."""
+    import asyncio
+
+    if not open_ts or open_ts <= 0:
+        return None
+    start = int(max(open_ts - 5.0, 0) * 1000)
+    for attempt in range(3):
+        try:
+            inc = await _req(
+                "GET", "/fapi/v1/income",
+                {"symbol": cfg.SYMBOL, "startTime": start, "limit": 1000},
+            )
+        except Exception:
+            inc = None
+        if isinstance(inc, list):
+            total = 0.0
+            seen = False
+            for x in inc:
+                it = x.get("incomeType")
+                if it in ("REALIZED_PNL", "COMMISSION", "FUNDING_FEE"):
+                    total += float(x.get("income") or 0)
+                    if it == "REALIZED_PNL":
+                        seen = True
+            if seen:
+                return round(total, 4)
+        if attempt < 2:
+            await asyncio.sleep(1.0)  # income kaydi kapanistan biraz sonra gelir
+    return None
 
 
 async def restore_exchange_position_on_startup() -> None:
@@ -727,10 +762,14 @@ async def sync_position_state() -> bool:
         from execution.position_lifecycle import async_finalize_position_closed
 
         mark = float(state.mark_price or state.price or 0)
+        # GERCEK PnL: SL/TP borsada doldu -> Binance income'dan gercek realized PnL cek
+        # (yerel mark-bazli hesap yerine birebir Binance degeri kaydedilir).
+        real_pnl = await fetch_realized_pnl_since(getattr(state, "pos_open_ts", 0))
         await async_finalize_position_closed(
             "exchange_closed_poll",
             source="sync",
             exit_price=mark,
+            pnl=real_pnl,
         )
         return False
 
@@ -926,11 +965,19 @@ async def close_position(reason: str = "signal") -> float:
     from core.fees import net_pnl as _net_pnl
 
     pnl = _net_pnl(state.pos_entry, exit_px, state.pos_qty, state.pos_side)
+    pnl_source = "yerel"
+    # GERCEK PnL: canlida Binance income'dan cek (yerel hesap fill/komisyon/kismi-dolum
+    # farkiyla tutmuyor). Birebir Binance realized PnL kaydedilir; income gelmezse yerel.
+    if not is_paper_mode():
+        real = await fetch_realized_pnl_since(state.pos_open_ts)
+        if real is not None:
+            pnl = real
+            pnl_source = "binance"
     dur_min = round((time.time() - state.pos_open_ts) / 60, 1)
 
     log.info(
         f"POZİSYON KAPATILDI: {state.pos_side} @ {exit_px:.2f}  "
-        f"PnL={pnl:+.4f} USDT  süre={dur_min}dk  sebep={reason}"
+        f"PnL={pnl:+.4f} USDT ({pnl_source})  süre={dur_min}dk  sebep={reason}"
     )
 
     if _trade_id:

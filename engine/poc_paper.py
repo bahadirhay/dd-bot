@@ -139,9 +139,18 @@ def build_live_decision() -> dict | None:
     global _last_d_entry_bar
     if bool(getattr(cfg, "V3_B_BARCLOSE_ENTRY", True)):
         if cur_bar == _last_d_entry_bar:
+            # TESHIS: bu barda gecerli sinyal var ama kapi zaten tuketilmis. Eger kapiyi
+            # mum-ici bir 1m tick tukettiyse, 15m-kapanis girisi burada PRE-EMPT olur ->
+            # D sinyal verir ama hic acilmaz. Bu logu gorursen kok-neden budur.
+            log.info(
+                f"[D-DIAG] {side} sinyal VAR (dev={s.get('dev')}) ama _last_d_entry_bar=bu bar "
+                f"(bar={cur_bar}) -> 15m-kapanis girisi PRE-EMPT, trade ACILMADI. "
+                f"Kapi mum-ici tick'te mi tuketildi?"
+            )
             return {"action": "WAIT", "reason": "D 15m bar-kapanis bekle (intrabar giris yok)",
                     "details": {}}
         _last_d_entry_bar = cur_bar
+        log.info(f"[D-DIAG] {side} kapi ARMED (bar={cur_bar} dev={s.get('dev')}) -> bu cagri execute path'e gidiyor")
     px = s["px"]
     try:
         from botlog.db import log_d_journal

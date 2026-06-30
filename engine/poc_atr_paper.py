@@ -24,8 +24,14 @@ log = get_logger("PocAtrPaper")
 # GLM/AVAX/ARB/INJ her iki olcude + ve >=3/5 (ANA katman). SUI/OP elendi.
 # IZLEME katmani (cift-olcu + ama yalniz 2/5 = rejim-yogun, dusuk-guven): SYN/PYTH.
 # Amac: forward'da ANA katman (>=3/5) izleme katmanini (2/5) geciyor mu -> bari dogrula.
-SYMBOLS = ["ETHUSDT", "GLMUSDT", "AVAXUSDT", "ARBUSDT", "INJUSDT", "SYNUSDT", "PYTHUSDT"]
-WATCH_TIER = {"SYNUSDT", "PYTHUSDT"}  # dusuk-guven (2/5), gozlem; kanitlanmis degil
+# TARAMA katmani: 41 likit perp taramasinda SIKI bari (cift-olcu+ VE >=4/5) gecen +
+# gecmis(>=80g)+likidite confounder testini gecenler: RAVE(5/5,125g,95M), 1000PEPE
+# (4/5,125g,141M), SNDK(4/5,84g,1.26B). DRAM elendi (43g=yeni). Hala forward-bekler.
+SYMBOLS = ["ETHUSDT", "GLMUSDT", "AVAXUSDT", "ARBUSDT", "INJUSDT",
+           "SYNUSDT", "PYTHUSDT",
+           "RAVEUSDT", "1000PEPEUSDT", "SNDKUSDT"]
+WATCH_TIER = {"SYNUSDT", "PYTHUSDT"}            # dusuk-guven (2/5), gozlem
+SCAN_TIER = {"RAVEUSDT", "1000PEPEUSDT", "SNDKUSDT"}  # tarama-bulgusu, siki bar gecti, forward-bekler
 M = 40                          # POC penceresi (canli D ile ayni)
 # Vol-normalize: DEV ve SL her coinin KENDI ATR'sinin katlari (ATR=SL boyutlama, sinyal degil).
 # Multipleler ETH'e cipalandi: ETH'te SL~2.5*ATR (en iyi cikan), DEV/SL orani canli D'nin 85/90'i.

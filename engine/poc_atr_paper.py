@@ -20,13 +20,18 @@ from core.logger import get_logger
 
 log = get_logger("PocAtrPaper")
 
-SYMBOLS = ["ETHUSDT"]          # genisletilebilir: ["ETHUSDT","SUIUSDT","AVAXUSDT"]
+# ETH (cipa, canli D A/B) + cift-olcu (ATR & std) robustluk barini gecen coinler:
+# GLM/AVAX/ARB/INJ her iki olcude + ve >=3/5. SUI/OP elendi (tek-olcu/kirilgan).
+SYMBOLS = ["ETHUSDT", "GLMUSDT", "AVAXUSDT", "ARBUSDT", "INJUSDT"]
 M = 40                          # POC penceresi (canli D ile ayni)
-DEV = 85.0                     # giris esigi bps (canli D ile ayni)
-ATR_MULT = 2.5                # SL = ATR_MULT * ATR(14)  (ETH'te en iyi cikan carpan)
+# Vol-normalize: DEV ve SL her coinin KENDI ATR'sinin katlari (ATR=SL boyutlama, sinyal degil).
+# Multipleler ETH'e cipalandi: ETH'te SL~2.5*ATR (en iyi cikan), DEV/SL orani canli D'nin 85/90'i.
 ATR_P = 14
+DEV_MULT = 2.36                # DEV_bps = 2.36 * ATR  (~85/90 * SL_MULT)
+SL_MULT = 2.5                  # SL_bps  = 2.5  * ATR  (ETH'te sabit-90'i gecen carpan)
 MAXHOLD = 16                   # bar (canli D ile ayni)
-SL_FLOOR = 30.0               # min SL bps (cok sakin donemde gurultu korumasi)
+DEV_FLOOR = 40.0              # min giris esigi bps
+SL_FLOOR = 30.0               # min SL bps
 FEE = 3.0                       # paper kayit (bilgi); gercek net Binance'te olcum disi
 
 _pos: dict[str, dict] = {}
@@ -106,6 +111,8 @@ def _tick_symbol(sym: str) -> None:
     if not pc or c <= 0:
         return
     dev = (c - pc) / pc * 1e4
+    atr = _atr_bps(bars, i)
+    dev_thr = max(DEV_MULT * atr, DEV_FLOOR)   # vol-normalize giris esigi
     pos = _pos.get(sym)
 
     if pos:
@@ -128,16 +135,15 @@ def _tick_symbol(sym: str) -> None:
             _pos.pop(sym, None)
         return
 
-    # flat -> giris (canli D ile AYNI esik)
-    side = "LONG" if dev <= -DEV else ("SHORT" if dev >= DEV else None)
+    # flat -> giris (vol-normalize esik: |dev| >= dev_thr)
+    side = "LONG" if dev <= -dev_thr else ("SHORT" if dev >= dev_thr else None)
     if not side:
         return
-    atr = _atr_bps(bars, i)
-    sl_bps = max(ATR_MULT * atr, SL_FLOOR)
+    sl_bps = max(SL_MULT * atr, SL_FLOOR)
     sl = c * (1 - sl_bps / 1e4) if side == "LONG" else c * (1 + sl_bps / 1e4)
     rid = log_atr_open(sym, side, c, dev, sl)
     _pos[sym] = {"id": rid, "side": side, "entry": c, "sl": sl, "open_ts": time.time()}
-    log.info(f"[ATR-PAPER] {sym} {side} @{c:.4f} dev={dev:+.0f} SL={sl_bps:.0f}bps(ATRx{ATR_MULT})")
+    log.info(f"[ATR-PAPER] {sym} {side} @{c:.4f} dev={dev:+.0f}/{dev_thr:.0f} SL={sl_bps:.0f}bps(ATRx{SL_MULT})")
 
 
 def paper_tick() -> None:

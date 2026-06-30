@@ -1603,12 +1603,15 @@ async def _fill_missing_levels() -> None:
         _, sl, tp1, tp2 = calc_trade_levels(
             state.pos_side, state.pos_entry, state
         )
-    if sl > 0:
+    # YALNIZ gercekten BOS olan seviyeyi doldur. Gecerli SL'i (orn restore'da tezden
+    # kurulan 1581.26) yapi-recompute ile EZME -> eski bug: TP1 eksikse SL de struktur
+    # destegine (cok asagi, 263bps) cekilip RR bozuluyordu (#270).
+    if sl > 0 and state.pos_sl <= 0:
         state.pos_sl = sl
         state.pos_sl_initial = sl
-    if tp1 > 0:
+    if tp1 > 0 and state.pos_tp1 <= 0:
         state.pos_tp1 = tp1
-    if tp2 > 0:
+    if tp2 > 0 and state.pos_tp2 <= 0:
         state.pos_tp2 = tp2
     if (
         not bool(getattr(cfg, "V3_FULL_RUNNER_NO_TP", True))

@@ -161,6 +161,69 @@ def get_open_atr(symbol: str) -> dict | None:
     return None
 
 
+def _migrate_maker_paper(db: sqlite3.Connection) -> None:
+    """D maker-limit giris SHADOW (poc_maker_paper) — canli fill-rate olcumu + maker-vs-taker A/B.
+    D sinyalinde kapanisin ~5bps altina/ustune LIMIT; dolar(FILLED)/kacar(MISSED). Gercek emir YOK.
+    Amac: taker(canli D) vs maker(bu shadow) forward kiyas + gercek dolum orani."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS poc_maker_paper (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            open_ts REAL NOT NULL, open_human TEXT, symbol TEXT, side TEXT,
+            signal_price REAL, limit_price REAL, fill_price REAL,
+            close_ts REAL, exit REAL, pnl_bps REAL, reason TEXT,
+            status TEXT DEFAULT 'PENDING'
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_maker_ts ON poc_maker_paper(open_ts DESC)")
+
+
+def log_maker_open(symbol: str, side: str, sig_px: float, lim_px: float) -> int:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            cur = db.execute(
+                "INSERT INTO poc_maker_paper (open_ts,open_human,symbol,side,signal_price,limit_price,status) "
+                "VALUES (?,?,?,?,?,?, 'PENDING')",
+                (datetime.now().timestamp(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                 str(symbol), str(side), float(sig_px or 0), float(lim_px or 0)))
+            return int(cur.lastrowid or 0)
+    except Exception:
+        return 0
+
+
+def update_maker_status(rid: int, status: str, fill_px: float = 0.0,
+                        exit_px: float = 0.0, pnl_bps: float = 0.0, reason: str = "") -> None:
+    from datetime import datetime
+    try:
+        with _conn() as db:
+            if status == "FILLED":
+                db.execute("UPDATE poc_maker_paper SET status='FILLED', fill_price=? WHERE id=?",
+                           (float(fill_px or 0), int(rid)))
+            elif status == "MISSED":
+                db.execute("UPDATE poc_maker_paper SET status='MISSED', close_ts=? WHERE id=?",
+                           (datetime.now().timestamp(), int(rid)))
+            elif status == "CLOSED":
+                db.execute("UPDATE poc_maker_paper SET status='CLOSED', close_ts=?, exit=?, pnl_bps=?, reason=? WHERE id=?",
+                           (datetime.now().timestamp(), float(exit_px or 0), float(pnl_bps or 0), str(reason), int(rid)))
+    except Exception:
+        pass
+
+
+def get_open_maker(symbol: str) -> dict | None:
+    """Acik (PENDING/FILLED) poc_maker_paper satiri — restart restore."""
+    try:
+        with _conn() as db:
+            row = db.execute(
+                "SELECT id, side, signal_price, limit_price, fill_price, status FROM poc_maker_paper "
+                "WHERE status IN ('PENDING','FILLED') AND symbol=? ORDER BY id DESC LIMIT 1", (str(symbol),)).fetchone()
+        if row:
+            return {"id": int(row["id"]), "side": str(row["side"]), "sig": float(row["signal_price"] or 0),
+                    "lim": float(row["limit_price"] or 0), "fill": float(row["fill_price"] or 0), "status": str(row["status"])}
+    except Exception:
+        pass
+    return None
+
+
 def _migrate_ftsm_paper(db: sqlite3.Connection) -> None:
     """Strateji F: GUNLUK time-series-momentum trend-takip paper (shadow) — gercek emir YOK.
     BUYUK bulgu: trend ETH'de GUNLUK barda calisir (OOS Sharpe ~1.1, +85%). D'ye tamamlayici
@@ -649,6 +712,7 @@ def init():
         _migrate_tmom_paper(db)
         _migrate_ftsm_paper(db)
         _migrate_atr_paper(db)
+        _migrate_maker_paper(db)
         # Orphan temizligi: restart hafizadaki paper pozisyonunu sifirlar, DB satiri
         # "OPEN" kalir -> net'i bozar. Startup'ta acik paper kayitlarini ORPHAN isaretle
         # (CLOSED degil -> net hesabina girmez). Gercek para yok, sadece kayit hijyeni.

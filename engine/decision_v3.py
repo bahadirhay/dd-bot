@@ -394,6 +394,13 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
         atr_tick()
     except Exception:
         pass
+    # D MAKER-limit giris shadow: taker(canli D) vs maker(limit) forward + gercek fill-rate olcum.
+    try:
+        from engine.poc_maker_paper import paper_tick as maker_tick
+
+        maker_tick()
+    except Exception:
+        pass
     # 1h MOMENTUM trend-takip paper (shadow): ilk OOS-pozitif trend yaklasimi (1h N24).
     # D(range) yaninda trend-ayagi adayi; iki-bot vizyonu icin canli dogrulama.
     try:

@@ -134,6 +134,16 @@ def build_live_decision() -> dict | None:
             pass
     if not side:
         return {"action": "WAIT", "reason": f"D sinyal yok (dev={s.get('dev')})", "details": {}}
+    # 15m-SINIR kapisi: on_15m_market REST-fallback ile MUM-ICI de atesleniyor (kapanmis bari
+    # gec tespit), D dev'i CANLI fiyat kullaniyor -> mum-ici giris oluyordu. Duzeltme: D yalniz
+    # gercek 15m sinirina yakinken (ilk ~V3_POC_BARCLOSE_SEC saniye) girsin; gec-tetikleri ele.
+    # (backtest 15m-kapanis varsayiyor; canli ile hizala.)
+    into_bar = time.time() % 900
+    thr = float(getattr(cfg, "V3_POC_BARCLOSE_SEC", 120) or 120)
+    if into_bar > thr:
+        return {"action": "WAIT",
+                "reason": f"D 15m-sinir disi ({into_bar:.0f}s icerde) — mum-ici giris yok",
+                "details": {}}
     # D 15m-KAPANIS girisi: karar HER cagrida uretilir (sinyal varken). Gercek emir trader'da
     # YALNIZ 15m-kapanis yolunda atilir (on_15m_market); 1m intrabar reclaim D'yi atlar ->
     # "intrabar YOK" boyle saglanir. ESKI self-gate (_last_d_entry_bar) mum-ici 1m tick'te

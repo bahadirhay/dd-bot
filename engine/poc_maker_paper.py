@@ -40,6 +40,18 @@ def _bar_id() -> int:
     return int(time.time() // 900)
 
 
+def _compute_signal() -> dict:
+    """Canli D'nin sinyali (ER-kapisi + DEV esigi dahil) — birebir sadakat icin."""
+    from engine.poc_paper import compute_signal
+    return compute_signal()
+
+
+def _poc_reverted(side: str) -> bool:
+    """Canli D'nin POC-donus cikisi."""
+    from engine.poc_paper import poc_mean_reverted
+    return poc_mean_reverted(side)
+
+
 def _klines(limit: int = 130) -> list | None:
     global _cache
     day = _bar_id()
@@ -116,7 +128,7 @@ def paper_tick() -> None:
                                 pnl_bps=round(-SL - MAKER_COST, 1), reason="sl")
             log.info(f"[MAKER] SL {side} -{SL:.0f}bps")
             _pos = None
-        elif ((side == "LONG" and dev >= 0) or (side == "SHORT" and dev <= 0)) and cur >= 0:
+        elif _poc_reverted(side) and cur >= 0:
             update_maker_status(_pos["id"], "CLOSED", exit_px=c, pnl_bps=round(cur - MAKER_COST, 1), reason="poc_revert")
             log.info(f"[MAKER] POC-donus {side} +{cur:.0f}bps (net {cur-MAKER_COST:+.0f})")
             _pos = None
@@ -140,11 +152,15 @@ def paper_tick() -> None:
             _pending = None
         return
 
-    # 3) FLAT -> sinyal? limit koy (bu barda dolum kontrol ETME)
-    side = "LONG" if dev <= -DEV else ("SHORT" if dev >= DEV else None)
-    if not side:
+    # 3) FLAT -> sinyal: canli D ile BIREBIR. compute_signal ER-kapisi + dogru DEV esigini
+    #    (V3_POC_DEV_BPS) uygular -> maker shadow = canli D SINYALI + maker execution.
+    #    Boylece kiyas yalniz EXECUTION farkini olcer (ER-kapisi eksikligi bozmaz).
+    s = _compute_signal()
+    side = s.get("signal")
+    if not side or not s.get("ready"):
         return
-    lim = c * (1 - OFFSET / 1e4) if side == "LONG" else c * (1 + OFFSET / 1e4)
-    rid = log_maker_open(SYMBOL, side, c, lim)
-    _pending = {"id": rid, "side": side, "sig": c, "lim": lim, "waited": 0}
-    log.info(f"[MAKER] LIMIT kondu {side} sig={c:.2f} lim={lim:.2f} dev={dev:+.0f}")
+    sig_px = float(s.get("px") or c)
+    lim = sig_px * (1 - OFFSET / 1e4) if side == "LONG" else sig_px * (1 + OFFSET / 1e4)
+    rid = log_maker_open(SYMBOL, side, sig_px, lim)
+    _pending = {"id": rid, "side": side, "sig": sig_px, "lim": lim, "waited": 0}
+    log.info(f"[MAKER] LIMIT kondu {side} sig={sig_px:.2f} lim={lim:.2f} dev={s.get('dev')} (ER-kapili)")

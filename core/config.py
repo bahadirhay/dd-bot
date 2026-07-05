@@ -684,6 +684,14 @@ class Config:
     # Plato 75-90; daha genis SL = az fitil-stop, daha cok trade POC'a ulasir. Kullanici hakli.
     V3_POC_MAXHOLD = int(os.getenv("V3_POC_MAXHOLD", "16"))
     V3_POC_MACRO_BPS = float(os.getenv("V3_POC_MACRO_BPS", "0"))  # 0=kapali (backtest makrosuz +1935)
+    # D PARTIAL-EXIT (dexit backtest OOS+): poc_revert'te V3_D_PARTIAL_PCT kadar al, kalan
+    # V3_D_RUNNER_TRAIL_BPS trailing ile karda tasi. PCT=1.0 -> eski %100-kapat davranisi.
+    V3_D_PARTIAL_PCT = float(os.getenv("V3_D_PARTIAL_PCT", "0.5"))
+    V3_D_RUNNER_TRAIL_BPS = float(os.getenv("V3_D_RUNNER_TRAIL_BPS", "40"))
+    # Feed-bayatliginda market-kapatma esigi: borsa SL varsa pozisyon zaten korumali ->
+    # gecici hickirikta erken kesme (kar kacir) yerine SL'ye birak (#298 fix). SL yoksa hizli.
+    V3_STALE_CLOSE_SEC = float(os.getenv("V3_STALE_CLOSE_SEC", "90"))       # SL aktifken
+    V3_STALE_CLOSE_NOSL_SEC = float(os.getenv("V3_STALE_CLOSE_NOSL_SEC", "10"))  # SL yokken
     # STRATEJI D CANLI: V3_STRATEGY_D_ENABLED=true ise D (POC) gercek emir uretir, B paper'a
     # cevrilir (V3_STRATEGY_B_ENABLED=false yap). Gercek-fee backtest D 2x B (+2003 vs +994).
     V3_STRATEGY_D_ENABLED = os.getenv("V3_STRATEGY_D_ENABLED", "false").lower() in ("1", "true", "yes")

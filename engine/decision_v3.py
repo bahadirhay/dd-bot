@@ -401,6 +401,31 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
         maker_tick()
     except Exception:
         pass
+    # EXTREME-FLOW SHORT paper (shadow): 15m forming delta_sum <= ~-3500 -> maker-limit SHORT.
+    # Ilk OOS-pozitif order-flow yaklasimi (extreme-flow gozlemi + maker-execution birlesti).
+    # YALNIZ SHORT (long robust degildi), 15m (5m OOS-cokuyordu). Canli fill + net dogrulama.
+    try:
+        from engine.xflow_paper import paper_tick as xflow_tick
+
+        xflow_tick()
+    except Exception:
+        pass
+    # FUNDING-KONTRARYAN paper (shadow): oturumun tek yeni permutasyon-DOGRULANMIS edge'i
+    # (p=0.033, 3/3 fold+, long+short dengeli). KONUMLANMA>akis tezi. Canli fill + net dogrulama.
+    try:
+        from engine.funding_paper import paper_tick as funding_tick
+
+        funding_tick()
+    except Exception:
+        pass
+    # D CIKIS A/B paper (shadow): full-exit vs %50+trailing40. Backtest OOS partial>full (+232 vs +61).
+    # Ayni canli D sinyalleri uzerinde temiz forward A/B. Gerçek emir YOK; canli D exit'i degismez.
+    try:
+        from engine.dexit_paper import paper_tick as dexit_tick
+
+        dexit_tick()
+    except Exception:
+        pass
     # 1h MOMENTUM trend-takip paper (shadow): ilk OOS-pozitif trend yaklasimi (1h N24).
     # D(range) yaninda trend-ayagi adayi; iki-bot vizyonu icin canli dogrulama.
     try:

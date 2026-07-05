@@ -224,6 +224,187 @@ def get_open_maker(symbol: str) -> dict | None:
     return None
 
 
+def _migrate_xflow_paper(db: sqlite3.Connection) -> None:
+    """Extreme-flow SHORT SHADOW (xflow_paper) — gercek emir YOK.
+    Bulgu: 15m forming delta_sum <= ~-3500 (extreme satis) -> maker-limit SHORT, kisa tut, net-pozitif
+    (OOS plato -3000/-4000, mh8). YALNIZ SHORT (long tarafi robust degildi), 15m (5m-cvd OOS coktu).
+    Amac: 41g-backtest OOS-pozitifligi CANLI forward'da tutuyor mu + gercek maker fill-rate."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS xflow_paper (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            open_ts REAL NOT NULL, open_human TEXT, symbol TEXT, side TEXT,
+            delta REAL, signal_price REAL, limit_price REAL, fill_price REAL,
+            close_ts REAL, exit REAL, pnl_bps REAL, reason TEXT,
+            status TEXT DEFAULT 'PENDING'
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_xflow_ts ON xflow_paper(open_ts DESC)")
+
+
+def log_xflow_open(symbol: str, side: str, delta: float, sig_px: float, lim_px: float) -> int:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            cur = db.execute(
+                "INSERT INTO xflow_paper (open_ts,open_human,symbol,side,delta,signal_price,limit_price,status) "
+                "VALUES (?,?,?,?,?,?,?, 'PENDING')",
+                (datetime.now().timestamp(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                 str(symbol), str(side), float(delta or 0), float(sig_px or 0), float(lim_px or 0)))
+            return int(cur.lastrowid or 0)
+    except Exception:
+        return 0
+
+
+def update_xflow_status(rid: int, status: str, fill_px: float = 0.0,
+                        exit_px: float = 0.0, pnl_bps: float = 0.0, reason: str = "") -> None:
+    from datetime import datetime
+    try:
+        with _conn() as db:
+            if status == "FILLED":
+                db.execute("UPDATE xflow_paper SET status='FILLED', fill_price=? WHERE id=?",
+                           (float(fill_px or 0), int(rid)))
+            elif status == "MISSED":
+                db.execute("UPDATE xflow_paper SET status='MISSED', close_ts=? WHERE id=?",
+                           (datetime.now().timestamp(), int(rid)))
+            elif status == "CLOSED":
+                db.execute("UPDATE xflow_paper SET status='CLOSED', close_ts=?, exit=?, pnl_bps=?, reason=? WHERE id=?",
+                           (datetime.now().timestamp(), float(exit_px or 0), float(pnl_bps or 0), str(reason), int(rid)))
+    except Exception:
+        pass
+
+
+def get_open_xflow(symbol: str) -> dict | None:
+    """Acik (PENDING/FILLED) xflow_paper satiri — restart restore."""
+    try:
+        with _conn() as db:
+            row = db.execute(
+                "SELECT id, side, delta, signal_price, limit_price, fill_price, status FROM xflow_paper "
+                "WHERE status IN ('PENDING','FILLED') AND symbol=? ORDER BY id DESC LIMIT 1", (str(symbol),)).fetchone()
+        if row:
+            return {"id": int(row["id"]), "side": str(row["side"]), "delta": float(row["delta"] or 0),
+                    "sig": float(row["signal_price"] or 0), "lim": float(row["limit_price"] or 0),
+                    "fill": float(row["fill_price"] or 0), "status": str(row["status"])}
+    except Exception:
+        pass
+    return None
+
+
+def _migrate_funding_paper(db: sqlite3.Connection) -> None:
+    """Funding-kontraryan SHADOW (funding_paper) — gercek emir YOK.
+    Bulgu (positioning-funding-jul2026): funding p85-uzeri(kalabalik long)->maker SHORT, p15-alti->maker LONG.
+    Permutasyon p=0.033 (drift-kontrollu bagimsiz olay), 3/3 zaman-fold pozitif, long+short dengeli.
+    KONUMLANMA>akis tezi. Amac: canli forward fill-rate + net'in dogrulanan edge'i koruyor mu."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS funding_paper (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            open_ts REAL NOT NULL, open_human TEXT, symbol TEXT, side TEXT,
+            funding REAL, signal_price REAL, limit_price REAL, fill_price REAL,
+            close_ts REAL, exit REAL, pnl_bps REAL, reason TEXT,
+            status TEXT DEFAULT 'PENDING'
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_funding_ts ON funding_paper(open_ts DESC)")
+
+
+def log_funding_open(symbol: str, side: str, funding: float, sig_px: float, lim_px: float) -> int:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            cur = db.execute(
+                "INSERT INTO funding_paper (open_ts,open_human,symbol,side,funding,signal_price,limit_price,status) "
+                "VALUES (?,?,?,?,?,?,?, 'PENDING')",
+                (datetime.now().timestamp(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                 str(symbol), str(side), float(funding or 0), float(sig_px or 0), float(lim_px or 0)))
+            return int(cur.lastrowid or 0)
+    except Exception:
+        return 0
+
+
+def update_funding_status(rid: int, status: str, fill_px: float = 0.0,
+                          exit_px: float = 0.0, pnl_bps: float = 0.0, reason: str = "") -> None:
+    from datetime import datetime
+    try:
+        with _conn() as db:
+            if status == "FILLED":
+                db.execute("UPDATE funding_paper SET status='FILLED', fill_price=? WHERE id=?",
+                           (float(fill_px or 0), int(rid)))
+            elif status == "MISSED":
+                db.execute("UPDATE funding_paper SET status='MISSED', close_ts=? WHERE id=?",
+                           (datetime.now().timestamp(), int(rid)))
+            elif status == "CLOSED":
+                db.execute("UPDATE funding_paper SET status='CLOSED', close_ts=?, exit=?, pnl_bps=?, reason=? WHERE id=?",
+                           (datetime.now().timestamp(), float(exit_px or 0), float(pnl_bps or 0), str(reason), int(rid)))
+    except Exception:
+        pass
+
+
+def get_open_funding(symbol: str) -> dict | None:
+    """Acik (PENDING/FILLED) funding_paper satiri — restart restore."""
+    try:
+        with _conn() as db:
+            row = db.execute(
+                "SELECT id, side, funding, signal_price, limit_price, fill_price, status FROM funding_paper "
+                "WHERE status IN ('PENDING','FILLED') AND symbol=? ORDER BY id DESC LIMIT 1", (str(symbol),)).fetchone()
+        if row:
+            return {"id": int(row["id"]), "side": str(row["side"]), "funding": float(row["funding"] or 0),
+                    "sig": float(row["signal_price"] or 0), "lim": float(row["limit_price"] or 0),
+                    "fill": float(row["fill_price"] or 0), "status": str(row["status"])}
+    except Exception:
+        pass
+    return None
+
+
+def _migrate_dexit_paper(db: sqlite3.Connection) -> None:
+    """D CIKIS A/B SHADOW (dexit_paper) — gercek emir YOK. Her canli D sinyalinde HEM full-exit
+    (mevcut: poc_revert'te %100 kapat) HEM partial (%50 poc_revert + %50 trailing 40bps) sonucunu
+    paralel hesaplar. Bulgu: ETH 31g backtest partial OOS'ta full'u gecti (+232 vs +61). Amac: canli
+    forward'da partial gercekten full'u geciyor mu (ayni sinyaller uzerinde temiz A/B)."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS dexit_paper (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            open_ts REAL NOT NULL, open_human TEXT, symbol TEXT, side TEXT,
+            entry REAL, full_bps REAL, partial_bps REAL, reason TEXT,
+            close_ts REAL, status TEXT DEFAULT 'OPEN'
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_dexit_ts ON dexit_paper(open_ts DESC)")
+
+
+def log_dexit_open(symbol: str, side: str, entry: float) -> int:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            cur = db.execute(
+                "INSERT INTO dexit_paper (open_ts,open_human,symbol,side,entry,status) VALUES (?,?,?,?,?, 'OPEN')",
+                (datetime.now().timestamp(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                 str(symbol), str(side), float(entry or 0)))
+            return int(cur.lastrowid or 0)
+    except Exception:
+        return 0
+
+
+def close_dexit(rid: int, full_bps: float, partial_bps: float, reason: str) -> None:
+    from datetime import datetime
+    try:
+        with _conn() as db:
+            db.execute("UPDATE dexit_paper SET status='CLOSED', close_ts=?, full_bps=?, partial_bps=?, reason=? WHERE id=?",
+                       (datetime.now().timestamp(), float(full_bps or 0), float(partial_bps or 0), str(reason), int(rid)))
+    except Exception:
+        pass
+
+
+def get_open_dexit(symbol: str) -> dict | None:
+    try:
+        with _conn() as db:
+            row = db.execute("SELECT id, side, entry FROM dexit_paper WHERE status='OPEN' AND symbol=? ORDER BY id DESC LIMIT 1",
+                             (str(symbol),)).fetchone()
+        if row:
+            return {"id": int(row["id"]), "side": str(row["side"]), "entry": float(row["entry"] or 0)}
+    except Exception:
+        pass
+    return None
+
+
 def _migrate_ftsm_paper(db: sqlite3.Connection) -> None:
     """Strateji F: GUNLUK time-series-momentum trend-takip paper (shadow) — gercek emir YOK.
     BUYUK bulgu: trend ETH'de GUNLUK barda calisir (OOS Sharpe ~1.1, +85%). D'ye tamamlayici
@@ -713,6 +894,9 @@ def init():
         _migrate_ftsm_paper(db)
         _migrate_atr_paper(db)
         _migrate_maker_paper(db)
+        _migrate_xflow_paper(db)
+        _migrate_funding_paper(db)
+        _migrate_dexit_paper(db)
         # Orphan temizligi: restart hafizadaki paper pozisyonunu sifirlar, DB satiri
         # "OPEN" kalir -> net'i bozar. Startup'ta acik paper kayitlarini ORPHAN isaretle
         # (CLOSED degil -> net hesabina girmez). Gercek para yok, sadece kayit hijyeni.

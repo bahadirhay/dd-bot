@@ -16,6 +16,16 @@ from utils.notifier import notify_tp1
 log = get_logger("PosMgr")
 
 
+def _stale_close_limit() -> float:
+    """Feed-bayatliginda market-kapatma esigi. Borsada aktif SL varsa pozisyon ZATEN korumali
+    (downside SL ile sinirli) -> gecici feed hickirginda erken kapatma YAPMA (kazancli pozisyonu
+    kesip kar kacirma; #298: +48bps kacti). SL yoksa (acik pozisyon) eski gibi hizli kapat."""
+    has_sl = bool(str(getattr(state, "pos_sl_id", "") or "")) and float(getattr(state, "pos_sl", 0) or 0) > 0
+    if has_sl:
+        return float(getattr(cfg, "V3_STALE_CLOSE_SEC", 90) or 90)
+    return float(getattr(cfg, "V3_STALE_CLOSE_NOSL_SEC", 10) or 10)
+
+
 async def check(executor) -> Optional[str]:
     if not state.in_position:
         return None
@@ -50,8 +60,9 @@ async def check(executor) -> Optional[str]:
         ret = await check_v2_position(executor)
         if ret:
             return ret
-        if not data_is_fresh(10):
-            log.warning("Veri 10sn'den eski → kapatılıyor")
+        _lim = _stale_close_limit()
+        if not data_is_fresh(_lim):
+            log.warning(f"Veri {_lim:.0f}sn'den eski (SL={'var→SL korur' if _lim > 30 else 'yok'}) → kapatılıyor")
             await executor.close_position("stale_data")
             return "STALE_DATA"
         return None
@@ -86,8 +97,9 @@ async def check(executor) -> Optional[str]:
         await executor.close_position("cvd_reverse")
         return "CVD_REVERSE"
 
-    if not data_is_fresh(10):
-        log.warning("Veri 10sn'den eski → kapatılıyor")
+    _lim = _stale_close_limit()
+    if not data_is_fresh(_lim):
+        log.warning(f"Veri {_lim:.0f}sn'den eski (SL={'var→SL korur' if _lim > 30 else 'yok'}) → kapatılıyor")
         await executor.close_position("stale_data")
         return "STALE_DATA"
 

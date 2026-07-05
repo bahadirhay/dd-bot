@@ -542,6 +542,8 @@ async def _execute_market_entry(plan: Plan, signal_id: int) -> bool:
     state.pos_liq_price = plan.liq_price
     state.pos_margin = plan.margin_req
     state.pos_tp1_hit = False
+    state.pos_d_runner = False
+    state.pos_d_runner_peak = 0.0
     state.pos_be_active = False
     state.pos_open_ts = time.time()
 

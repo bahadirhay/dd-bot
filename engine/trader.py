@@ -262,12 +262,16 @@ async def _maybe_protective_exit() -> bool:
     if bool(getattr(cfg, "V3_STRATEGY_D_ENABLED", False)):
         try:
             from engine.poc_paper import poc_mean_reverted
-            from execution.executor import close_position
+            from execution.executor import close_position, close_partial
 
             cur_bps = ((entry - mark) if side == "SHORT" else (mark - entry)) / entry * 1e4
             min_prof = float(getattr(cfg, "V3_B_REVERT_MIN_PROFIT_BPS", 0.0) or 0.0)
             mh_bars = int(getattr(cfg, "V3_POC_MAXHOLD", 16) or 16)
             age_bars = (time.time() - float(getattr(state, "pos_open_ts", 0) or 0)) / 900
+            # PARTIAL-EXIT (dexit backtest OOS+): poc_revert'te %pct al, kalan %(1-pct)'yi
+            # trailing-stop (trail_bps) ile karda tasi. pct=1.0 -> eski %100 davranis.
+            pct = float(getattr(cfg, "V3_D_PARTIAL_PCT", 0.5) or 0.5)
+            trail = float(getattr(cfg, "V3_D_RUNNER_TRAIL_BPS", 40.0) or 40.0)
             def _djx(reason):
                 try:
                     from botlog.db import log_d_journal, get_open_trade_id
@@ -275,7 +279,39 @@ async def _maybe_protective_exit() -> bool:
                                   trade_id=int(get_open_trade_id() or 0))
                 except Exception:
                     pass
+
+            # RUNNER fazi: %pct alindi, kalan trailing ile. Kendi 40bps soft-trail'imiz yonetir
+            # (pos_tp1_hit KULLANMIYORUZ -> mevcut yapisal/flow trail makinesi karismaz).
+            # Borsadaki 90bps SL felaket-backstop olarak durur.
+            if bool(getattr(state, "pos_d_runner", False)):
+                peak = max(float(getattr(state, "pos_d_runner_peak", 0.0) or 0.0), cur_bps)
+                state.pos_d_runner_peak = peak
+                if cur_bps <= peak - trail:
+                    log.info(f"[D-LIVE] runner trailing-stop (kar={cur_bps:+.0f} <= tepe {peak:.0f}-{trail:.0f}) — kalani kapat")
+                    _djx("d_runner_trail"); _mark_protect_exit()
+                    await close_position(reason="d_runner_trail")
+                    return True
+                if age_bars >= mh_bars:
+                    log.info(f"[D-LIVE] runner maxhold {mh_bars} bar (kar={cur_bps:+.0f}bps) — kalani kapat")
+                    _djx("d_runner_maxhold"); _mark_protect_exit()
+                    await close_position(reason="d_runner_maxhold")
+                    return True
+                return False  # runner devam; borsa SL backstop
+
+            # ACTIVE faz: POC-donus + karda -> %pct al, kalan runner'a gec
             if poc_mean_reverted(side) and cur_bps >= min_prof:
+                if pct < 0.999:
+                    log.info(f"[D-LIVE] {side} POC-donus (kar={cur_bps:+.0f}bps) — %{pct*100:.0f} al, kalan runner (trail {trail:.0f}bps)")
+                    _djx("d_poc_revert_partial")
+                    ok = await close_partial(pct, reason="d_poc_revert_partial")
+                    if ok:
+                        state.pos_d_runner = True
+                        state.pos_d_runner_peak = cur_bps
+                        return True
+                    # partial basarisiz -> guvenli taraf: tamamini kapat (eski davranis)
+                    log.warning("[D-LIVE] close_partial basarisiz -> tamamini kapat")
+                    _mark_protect_exit(); await close_position(reason="d_poc_revert")
+                    return True
                 log.info(f"[D-LIVE] {side} POC-donus (kar={cur_bps:+.0f}bps) — tamamini kapat")
                 _djx("d_poc_revert"); _mark_protect_exit()
                 await close_position(reason="d_poc_revert")

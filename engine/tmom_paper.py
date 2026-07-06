@@ -1,13 +1,15 @@
 """
 engine/tmom_paper.py — 1h MOMENTUM trend-takip paper (shadow). GERCEK EMIR YOK.
 
-Kullanici icgorusu: trend zaman dilimine bagli. 15m'de tum trend-takip OOS-negatifti;
-1h'de momentum (N24=24h geri-bakis, esik 150bps) ILK OOS-pozitif trend yaklasimi:
-net +893, OOS +418, 4/4 ceyrek (fee8+slip2). N24-30/THR100-150 kumesi OOS+. Dar plato,
-kucuk orneklem -> PAPER ile canli dogrulama. D(MR/range) yaninda trend-ayagi adayi.
+Kullanici icgorusu: trend zaman dilimine bagli + short da gercek (yeterli veriyle). 6000-bar/250g
+1h backtest: SIMETRIK momentum N48 (2-gun geri-bakis, saf-isaret) trail300/SL300 -> net +2852/335,
+3/3 rejim-donemi POZITIF. SHORT dususte +4958, LONG yukseliste (oto-switch); bu 250g net-dususte
+short domine. NOT: N-hassas (N36/N72 negatif, N48 keskin tepe) -> overfit riski, PAPER forward sart.
+Onceki kurgu N24/THR150/CVD-teyit idi; sadelestirildi (kullanici: kurguyu basitlestir).
 
-Sinyal: r = (close - close[-N]) / close[-N] ; r>+THR -> LONG, r<-THR -> SHORT (TRENDLE GIT).
-Cikis: tepe-trail (kazanani kostur) | hard-SL | maxhold. (MR DEGIL — trend-takip.)
+Sinyal: r = (px - close[-N]) / close[-N] ; r>0 -> LONG, r<0 -> SHORT (momentum yonunde, oto-switch).
+Cikis: tepe-trail (kazanani kostur) | ters-momentum FLIP | hard-SL | maxhold. (MR DEGIL — trend-takip.)
+D(MR/range) yaninda trend-ayagi: dususte short, yukseliste long taşır -> "trendde disarda kalma" cozumu.
 Paper-only; gercek emir YOK.
 """
 from __future__ import annotations
@@ -59,17 +61,15 @@ def paper_tick() -> None:
     px = float(getattr(state, "mark_price", 0) or getattr(state, "price", 0) or 0)
     if px <= 0:
         return
-    N = int(getattr(cfg, "V3_TMOM_N", 24) or 24)
+    N = int(getattr(cfg, "V3_TMOM_N", 48) or 48)
     C = _closes_1h(N + 10)
-    if len(C) < N + 1:
+    if len(C) < N + 1 or C[-1 - N] <= 0:
         return
-    # CVD gecmisi (1h bar basina cvd_raw) — CVD-uyumlu teyit icin
-    cvd = getattr(state, "cvd_raw", None)
-    if cvd is not None:
-        _cvd_hist[_bar_id()] = float(cvd)
-        if len(_cvd_hist) > 60:
-            for kk in sorted(_cvd_hist)[:-60]:
-                _cvd_hist.pop(kk, None)
+    # SIMETRIK momentum isareti (N48 2-gunluk): 250g/6000-bar backtest, N48/trail300/SL300 net +2852,
+    # 3/3 rejim-donemi POZITIF; short DUSUSTE +4958, long yukseliste (oto-switch). THR=0 -> saf isaret.
+    thr = float(getattr(cfg, "V3_TMOM_THR", 0) or 0)
+    r = (px - C[-1 - N]) / C[-1 - N] * 1e4   # guncel fiyat vs N saat onceki kapanis
+    cur_sig = "LONG" if r > thr else ("SHORT" if r < -thr else None)
     fee = 3.0
     try:
         from botlog.db import log_tmom_close, log_tmom_open
@@ -77,9 +77,9 @@ def paper_tick() -> None:
         if _pos is not None:
             side = _pos["side"]; ent = _pos["entry"]
             cur = ((px - ent) if side == "LONG" else (ent - px)) / ent * 1e4
-            sl = float(getattr(cfg, "V3_TMOM_SL_BPS", 120) or 120)
-            trail = float(getattr(cfg, "V3_TMOM_TRAIL_BPS", 80) or 80)
-            mh_h = int(getattr(cfg, "V3_TMOM_MAXHOLD_H", 72) or 72)
+            sl = float(getattr(cfg, "V3_TMOM_SL_BPS", 300) or 300)
+            trail = float(getattr(cfg, "V3_TMOM_TRAIL_BPS", 300) or 300)
+            mh_h = int(getattr(cfg, "V3_TMOM_MAXHOLD_H", 400) or 400)
             adverse = ((px - ent) if side == "SHORT" else (ent - px)) / ent * 1e4
             # tepe-trail (kazanani kostur)
             if side == "LONG":
@@ -90,26 +90,20 @@ def paper_tick() -> None:
                 log_tmom_close(_pos["id"], px, -sl - fee, "hard-SL"); _pos = None
             elif retr >= trail and cur > 0:
                 log_tmom_close(_pos["id"], px, cur - fee, "trail"); _pos = None
+            elif cur_sig is not None and cur_sig != side:   # ters momentum -> cik (backtest: flip)
+                log_tmom_close(_pos["id"], px, cur - fee, "flip"); _pos = None
             elif (_bar_id() - _pos["bar"]) >= mh_h:
                 log_tmom_close(_pos["id"], px, cur - fee, "maxhold"); _pos = None
             return
-        # flat: momentum sinyali?
-        thr = float(getattr(cfg, "V3_TMOM_THR", 150) or 150)
-        if C[-1 - N] <= 0:
-            return
-        r = (px - C[-1 - N]) / C[-1 - N] * 1e4   # guncel fiyat vs N saat onceki kapanis
-        sig = "LONG" if r > thr else ("SHORT" if r < -thr else None)
-        if not sig:
-            return
-        # CVD-uyumlu teyit: CVD trendle ayni yonde degilse girme (whipsaw azaltir, OOS+459)
-        if not _cvd_aligned(sig):
+        # flat: momentum yonunde gir (oto long/short)
+        if not cur_sig:
             return
         bid = _bar_id()
         if bid == _last_bar:
             return
         _last_bar = bid
-        rid = log_tmom_open(sig, px, r)
-        _pos = {"id": rid, "side": sig, "entry": px, "bar": bid, "peak": px}
-        log.info(f"[TMOM-PAPER] {sig} @{px:.1f} mom={r:+.0f}bps (trend-takip)")
+        rid = log_tmom_open(cur_sig, px, r)
+        _pos = {"id": rid, "side": cur_sig, "entry": px, "bar": bid, "peak": px}
+        log.info(f"[TMOM-PAPER] {cur_sig} @{px:.1f} mom={r:+.0f}bps N{N} (simetrik trend-takip)")
     except Exception as ex:
         log.warning(f"[TMOM-PAPER] tick: {ex}")

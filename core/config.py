@@ -709,11 +709,11 @@ class Config:
     # 1h MOMENTUM trend-takip paper (shadow) — gercek emir YOK. Ilk OOS-pozitif trend
     # yaklasimi (1h, N24/THR150: OOS+418, 4/4). D(range) yaninda trend-ayagi adayi.
     V3_TMOM_PAPER = os.getenv("V3_TMOM_PAPER", "true").lower() in ("1", "true", "yes")
-    V3_TMOM_N = int(os.getenv("V3_TMOM_N", "24"))           # 1h bar geri-bakis (24h)
-    V3_TMOM_THR = float(os.getenv("V3_TMOM_THR", "150"))    # momentum esigi (bps)
-    V3_TMOM_SL_BPS = float(os.getenv("V3_TMOM_SL_BPS", "120"))
-    V3_TMOM_TRAIL_BPS = float(os.getenv("V3_TMOM_TRAIL_BPS", "80"))  # tepe-trail (kazanani kostur)
-    V3_TMOM_MAXHOLD_H = int(os.getenv("V3_TMOM_MAXHOLD_H", "72"))    # saat
+    V3_TMOM_N = int(os.getenv("V3_TMOM_N", "48"))           # 1h bar geri-bakis (48h=2gun); backtest tepe
+    V3_TMOM_THR = float(os.getenv("V3_TMOM_THR", "0"))      # 0=saf momentum isareti (simetrik oto-switch)
+    V3_TMOM_SL_BPS = float(os.getenv("V3_TMOM_SL_BPS", "300"))
+    V3_TMOM_TRAIL_BPS = float(os.getenv("V3_TMOM_TRAIL_BPS", "300"))  # tepe-trail (kazanani kostur)
+    V3_TMOM_MAXHOLD_H = int(os.getenv("V3_TMOM_MAXHOLD_H", "400"))    # saat (uzun trend tasima)
     # E CVD-uyumlu teyit: CVD trendle ayni yonde degilse girme. Dogrulandi: net +696->+888,
     # OOS +386->+459, isabet %41->%47, islem 61->38 (whipsaw azalir). order-flow teyidi ISE YARADI.
     V3_TMOM_CVD_CONFIRM = os.getenv("V3_TMOM_CVD_CONFIRM", "true").lower() in ("1", "true", "yes")

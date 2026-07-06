@@ -61,6 +61,38 @@ def _poc(rows) -> float:
     return num / den
 
 
+def _atr_sl_bps(px: float) -> float:
+    """ATR(14)-tabanli SL (bps), clamp'li. Vol-normalize risk: sabit bps yerine oynakliga uyar
+    (rejim/olcek degisince kirilmaz). ATR yoksa V3_POC_SL_BPS sabitine duser.
+    Backtest: geniss SL (SL300~7.5xATR) + maxhold64 + partial-runner OOS +1092 (SL90/mh16 +32);
+    dar SL MR'yi bogar (fitil-stop), erken-kar-kilit (TP1/BE) net'i coker. Clamp tail'i korur."""
+    fallback = float(getattr(cfg, "V3_POC_SL_BPS", 90) or 90)
+    if not bool(getattr(cfg, "V3_POC_SL_ATR_ENABLED", True)):
+        return fallback
+    try:
+        from engine.structure import get_bars_15m
+        w = 14
+        b = get_bars_15m(w + 6) or []
+        if len(b) < w + 1 or px <= 0:
+            return fallback
+        trs = []
+        for i in range(1, len(b)):
+            h = float(b[i].get("high", 0) or 0); l = float(b[i].get("low", 0) or 0)
+            pc = float(b[i - 1].get("close", 0) or 0)
+            if h <= 0 or l <= 0 or pc <= 0:
+                continue
+            trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+        if len(trs) < w:
+            return fallback
+        atr_bps = (sum(trs[-w:]) / w) / px * 1e4
+        mult = float(getattr(cfg, "V3_POC_SL_ATR_MULT", 7.5) or 7.5)
+        floor = float(getattr(cfg, "V3_POC_SL_ATR_FLOOR", 180) or 180)
+        ceil = float(getattr(cfg, "V3_POC_SL_ATR_CEIL", 400) or 400)
+        return max(floor, min(ceil, mult * atr_bps))
+    except Exception:
+        return fallback
+
+
 def compute_signal() -> dict:
     """Donus: {ready, dev, poc, px, signal}. signal: LONG/SHORT/None."""
     out = {"ready": False, "dev": None, "poc": None, "px": None, "signal": None,
@@ -159,7 +191,7 @@ def build_live_decision() -> dict | None:
                           reason=f"D {side} dev={s.get('dev')} (niyet-fiyat)")
         except Exception:
             pass
-    sl_bps = float(getattr(cfg, "V3_POC_SL_BPS", 60) or 60)
+    sl_bps = _atr_sl_bps(px)   # ATR-tabanli (vol-normalize), clamp'li; ATR yoksa V3_POC_SL_BPS
     far = float(getattr(cfg, "V3_POC_TP_FAR_BPS", 300) or 300)
     if side == "LONG":
         sl = px * (1 - sl_bps / 1e4); tp1 = px * (1 + far * 0.97 / 1e4); tp2 = px * (1 + far / 1e4)

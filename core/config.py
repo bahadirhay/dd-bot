@@ -682,7 +682,7 @@ class Config:
     V3_POC_SL_BPS = float(os.getenv("V3_POC_SL_BPS", "90"))  # 60 cok dardi (wick-stop);
     # SL sweep (fee8+slip2,WF): 60 OOS+235 -> 90 OOS+530 (~2x), isabet %42->%50, 4/4.
     # Plato 75-90; daha genis SL = az fitil-stop, daha cok trade POC'a ulasir. Kullanici hakli.
-    V3_POC_MAXHOLD = int(os.getenv("V3_POC_MAXHOLD", "16"))
+    V3_POC_MAXHOLD = int(os.getenv("V3_POC_MAXHOLD", "64"))  # 16->64: genis SL ile poc-donuse zaman (backtest OOS+)
     V3_POC_MACRO_BPS = float(os.getenv("V3_POC_MACRO_BPS", "0"))  # 0=kapali (backtest makrosuz +1935)
     # D PARTIAL-EXIT (dexit backtest OOS+): poc_revert'te V3_D_PARTIAL_PCT kadar al, kalan
     # V3_D_RUNNER_TRAIL_BPS trailing ile karda tasi. PCT=1.0 -> eski %100-kapat davranisi.
@@ -695,7 +695,13 @@ class Config:
     # STRATEJI D CANLI: V3_STRATEGY_D_ENABLED=true ise D (POC) gercek emir uretir, B paper'a
     # cevrilir (V3_STRATEGY_B_ENABLED=false yap). Gercek-fee backtest D 2x B (+2003 vs +994).
     V3_STRATEGY_D_ENABLED = os.getenv("V3_STRATEGY_D_ENABLED", "false").lower() in ("1", "true", "yes")
-    V3_POC_TP_FAR_BPS = float(os.getenv("V3_POC_TP_FAR_BPS", "300"))  # uzak TP (gercek cikis POC-donus)
+    V3_POC_TP_FAR_BPS = float(os.getenv("V3_POC_TP_FAR_BPS", "900"))  # uzak TP (phantom; gercek cikis POC-donus).
+    # 300->900: ATR-SL (~300, tavan 400) ile RR=far/sl>=2 kalsin ki RR-kapisi D'yi reddetmesin. TP zaten fire etmez.
+    # ATR-tabanli SL (vol-normalize): sabit bps yerine oynakliga uyar. clamp(mult*ATR14, floor, ceil).
+    V3_POC_SL_ATR_ENABLED = os.getenv("V3_POC_SL_ATR_ENABLED", "true").lower() in ("1", "true", "yes")
+    V3_POC_SL_ATR_MULT = float(os.getenv("V3_POC_SL_ATR_MULT", "7.5"))    # ~sabit 300'e denk (ATR-medyan 40)
+    V3_POC_SL_ATR_FLOOR = float(os.getenv("V3_POC_SL_ATR_FLOOR", "180"))  # ultra-sakinde cok dar olmasin
+    V3_POC_SL_ATR_CEIL = float(os.getenv("V3_POC_SL_ATR_CEIL", "400"))    # vol spike'inda tail kapagi
     # D REJIM kapisi (TRENDDE DUR): efficiency-ratio >= esik ise isleme girme. Trend-bleed
     # korumasi; dogrulandi kaybi kazanctan cok azaltir (+1718 vs +1590), olcek icin kritik.
     V3_POC_ER_GATE = float(os.getenv("V3_POC_ER_GATE", "0.50"))  # 0=kapali

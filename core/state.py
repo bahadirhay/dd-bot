@@ -148,7 +148,8 @@ class BotState:
     pos_tp2         : float = 0.0
     pos_tp1_hit     : bool  = False
     pos_d_runner    : bool  = False   # D partial-exit: %50 poc_revert alindi, kalan trailing runner
-    pos_d_runner_peak: float = 0.0    # runner icin gorulen en yuksek kar (bps) — 40bps trailing
+    pos_d_runner_peak: float = 0.0    # runner icin gorulen en yuksek kar (bps)
+    pos_d_runner_peak_px: float = 0.0 # runner tepe FIYAT — trailing exchange-SL bunun geriye trail eder
     pos_be_active   : bool  = False
     pos_sl_id       : str   = ""
     pos_sl_manage_ts: float = 0.0
@@ -195,6 +196,7 @@ class BotState:
         self.pos_tp1_hit  = False
         self.pos_d_runner = False
         self.pos_d_runner_peak = 0.0
+        self.pos_d_runner_peak_px = 0.0
         self.pos_be_active= False
         self.pos_sl_id    = ""
         self.pos_tp1_id   = ""

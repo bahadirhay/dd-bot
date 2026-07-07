@@ -280,41 +280,30 @@ async def _maybe_protective_exit() -> bool:
                 except Exception:
                     pass
 
-            # RUNNER fazi: %pct alindi, kalani TRENDLE TASI. Cikis = MOMENTUM-FLIP (kisa momentum
-            # trende karsi donunce) -> gurultu pullback'inde atilma yok, trend devamini yakalar.
-            # Bulgu: sabit-trail devami KACIRIYOR (MAE -92/-322 zarara otur ama +18/+37'de kar-kes,
-            # sonra +137bps daha gider). momflip runner-ek +9/+14bps + net> (OOS +1433 vs +1273).
-            # Geniss-trail backstop (buyuk kazanani tamamen geri verme) + maxhold + borsa SL yedek.
+            # RUNNER fazi: %pct alindi, kalani TRENDLE TASI. Cikis = TRAILING EXCHANGE-SL:
+            # SL'i tepe-fiyattan trail_bps geride BORSAYA tasi (replace_sl_algo, yalniz sikilastirir).
+            # Fiyat lehte gittikce SL pesinden gelir (kari kademeli kilitler), trend donunce BORSADA
+            # kapanir. Avantaj: bot koparsa/feed bayatlarsa bile kar korunur (soft-close degil).
+            # Backtest: geniss-trail(~120) devami yakalar (OOS +1456), 40bps sabit-trail'in aksine.
+            # maxhold bot-yedek; ATR-SL zaten borsada, trail onu sikilastirir.
             if bool(getattr(state, "pos_d_runner", False)):
-                peak = max(float(getattr(state, "pos_d_runner_peak", 0.0) or 0.0), cur_bps)
-                state.pos_d_runner_peak = peak
-                kbars = int(getattr(cfg, "V3_D_RUNNER_MOMFLIP_BARS", 6) or 6)
-                flipped = False
+                state.pos_d_runner_peak = max(float(getattr(state, "pos_d_runner_peak", 0.0) or 0.0), cur_bps)
+                pk = float(getattr(state, "pos_d_runner_peak_px", 0.0) or 0.0) or entry
+                pk = max(pk, mark) if side == "LONG" else min(pk, mark)
+                state.pos_d_runner_peak_px = pk
+                trail_sl = pk * (1 - trail / 1e4) if side == "LONG" else pk * (1 + trail / 1e4)
                 try:
-                    from engine.v3_common import bars_15m
-                    _b = bars_15m(kbars + 3)
-                    _cl = [float(x.get("close", 0) or 0) for x in _b if float(x.get("close", 0) or 0) > 0]
-                    if len(_cl) >= kbars + 1:
-                        mom = _cl[-1] - _cl[-1 - kbars]           # kisa momentum
-                        flipped = (mom > 0) if side == "SHORT" else (mom < 0)  # trende karsi dondu mu
-                except Exception:
-                    flipped = False
-                if flipped and cur_bps > 0:
-                    log.info(f"[D-LIVE] runner momentum-flip (kar={cur_bps:+.0f}bps, {kbars}-bar mom ters) — kalani kapat")
-                    _djx("d_runner_momflip"); _mark_protect_exit()
-                    await close_position(reason="d_runner_momflip")
-                    return True
-                if cur_bps <= peak - trail:   # geniss-trail backstop (buyuk kazanani koru)
-                    log.info(f"[D-LIVE] runner geniss-trail backstop (kar={cur_bps:+.0f} <= tepe {peak:.0f}-{trail:.0f}) — kalani kapat")
-                    _djx("d_runner_trail"); _mark_protect_exit()
-                    await close_position(reason="d_runner_trail")
-                    return True
+                    from execution.protection_orders import replace_sl_algo
+                    # yalniz sikilastirir; erken (kar<trail) iken ATR-SL'den gevsekse degismez
+                    await replace_sl_algo(round(trail_sl, 2), "d_runner_trail")
+                except Exception as ex2:
+                    log.debug(f"[D-LIVE] runner trail-SL: {ex2}")
                 if age_bars >= mh_bars:
                     log.info(f"[D-LIVE] runner maxhold {mh_bars} bar (kar={cur_bps:+.0f}bps) — kalani kapat")
                     _djx("d_runner_maxhold"); _mark_protect_exit()
                     await close_position(reason="d_runner_maxhold")
                     return True
-                return False  # runner devam; borsa SL backstop
+                return False  # cikis BORSADAKI trailing-SL ile (trend donunce)
 
             # ACTIVE faz: POC-donus + karda -> %pct al, kalan runner'a gec
             if poc_mean_reverted(side) and cur_bps >= min_prof:

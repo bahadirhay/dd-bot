@@ -689,8 +689,10 @@ class Config:
     V3_D_PARTIAL_PCT = float(os.getenv("V3_D_PARTIAL_PCT", "0.5"))
     # Runner cikis: TRAILING EXCHANGE-SL (tepe-fiyattan trail_bps geride borsaya tasi, replace_sl_algo).
     # Fiyat lehte gittikce SL pesinden gelir, trend donunce BORSADA kapanir -> bot koparsa bile kar korunur.
-    # Backtest: geniss-trail ~120 devami yakalar (OOS +1456), 40bps sabit-trail'in aksine.
-    V3_D_RUNNER_TRAIL_BPS = float(os.getenv("V3_D_RUNNER_TRAIL_BPS", "120"))    # tepe-fiyattan trail mesafesi
+    # Backtest: SABIT ~100 en iyi (OOS +1487/toplam +3411); ATR-kati DENENDI, DAHA KOTU (en iyi
+    # ATRx3 toplam +2727 < sabit100 +3411). SL'de ATR mantikli ama trail'de sabit -> devami sabit
+    # mesafe daha iyi tutuyor (devam hareketi son-ATR ile oranti degil). Her parametre isine gore.
+    V3_D_RUNNER_TRAIL_BPS = float(os.getenv("V3_D_RUNNER_TRAIL_BPS", "100"))    # tepe-fiyattan trail mesafesi (sabit)
     V3_D_RUNNER_MOMFLIP_BARS = int(os.getenv("V3_D_RUNNER_MOMFLIP_BARS", "6"))  # (deprecated; trailing-SL'e gecildi)
     # Feed-bayatliginda market-kapatma esigi: borsa SL varsa pozisyon zaten korumali ->
     # gecici hickirikta erken kesme (kar kacir) yerine SL'ye birak (#298 fix). SL yoksa hizli.

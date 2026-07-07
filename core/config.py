@@ -687,7 +687,10 @@ class Config:
     # D PARTIAL-EXIT (dexit backtest OOS+): poc_revert'te V3_D_PARTIAL_PCT kadar al, kalan
     # V3_D_RUNNER_TRAIL_BPS trailing ile karda tasi. PCT=1.0 -> eski %100-kapat davranisi.
     V3_D_PARTIAL_PCT = float(os.getenv("V3_D_PARTIAL_PCT", "0.5"))
-    V3_D_RUNNER_TRAIL_BPS = float(os.getenv("V3_D_RUNNER_TRAIL_BPS", "40"))
+    # Runner cikis: MOMENTUM-FLIP birincil (trendle tasi, gurultude atilma) + geniss-trail backstop.
+    # Backtest: momflip runner-ek +9/+14bps (sabit-trail -3) + net> ; devami yakalar.
+    V3_D_RUNNER_MOMFLIP_BARS = int(os.getenv("V3_D_RUNNER_MOMFLIP_BARS", "6"))  # kisa momentum bar
+    V3_D_RUNNER_TRAIL_BPS = float(os.getenv("V3_D_RUNNER_TRAIL_BPS", "150"))    # geniss backstop (40->150)
     # Feed-bayatliginda market-kapatma esigi: borsa SL varsa pozisyon zaten korumali ->
     # gecici hickirikta erken kesme (kar kacir) yerine SL'ye birak (#298 fix). SL yoksa hizli.
     V3_STALE_CLOSE_SEC = float(os.getenv("V3_STALE_CLOSE_SEC", "90"))       # SL aktifken

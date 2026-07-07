@@ -280,14 +280,32 @@ async def _maybe_protective_exit() -> bool:
                 except Exception:
                     pass
 
-            # RUNNER fazi: %pct alindi, kalan trailing ile. Kendi 40bps soft-trail'imiz yonetir
-            # (pos_tp1_hit KULLANMIYORUZ -> mevcut yapisal/flow trail makinesi karismaz).
-            # Borsadaki 90bps SL felaket-backstop olarak durur.
+            # RUNNER fazi: %pct alindi, kalani TRENDLE TASI. Cikis = MOMENTUM-FLIP (kisa momentum
+            # trende karsi donunce) -> gurultu pullback'inde atilma yok, trend devamini yakalar.
+            # Bulgu: sabit-trail devami KACIRIYOR (MAE -92/-322 zarara otur ama +18/+37'de kar-kes,
+            # sonra +137bps daha gider). momflip runner-ek +9/+14bps + net> (OOS +1433 vs +1273).
+            # Geniss-trail backstop (buyuk kazanani tamamen geri verme) + maxhold + borsa SL yedek.
             if bool(getattr(state, "pos_d_runner", False)):
                 peak = max(float(getattr(state, "pos_d_runner_peak", 0.0) or 0.0), cur_bps)
                 state.pos_d_runner_peak = peak
-                if cur_bps <= peak - trail:
-                    log.info(f"[D-LIVE] runner trailing-stop (kar={cur_bps:+.0f} <= tepe {peak:.0f}-{trail:.0f}) — kalani kapat")
+                kbars = int(getattr(cfg, "V3_D_RUNNER_MOMFLIP_BARS", 6) or 6)
+                flipped = False
+                try:
+                    from engine.v3_common import bars_15m
+                    _b = bars_15m(kbars + 3)
+                    _cl = [float(x.get("close", 0) or 0) for x in _b if float(x.get("close", 0) or 0) > 0]
+                    if len(_cl) >= kbars + 1:
+                        mom = _cl[-1] - _cl[-1 - kbars]           # kisa momentum
+                        flipped = (mom > 0) if side == "SHORT" else (mom < 0)  # trende karsi dondu mu
+                except Exception:
+                    flipped = False
+                if flipped and cur_bps > 0:
+                    log.info(f"[D-LIVE] runner momentum-flip (kar={cur_bps:+.0f}bps, {kbars}-bar mom ters) — kalani kapat")
+                    _djx("d_runner_momflip"); _mark_protect_exit()
+                    await close_position(reason="d_runner_momflip")
+                    return True
+                if cur_bps <= peak - trail:   # geniss-trail backstop (buyuk kazanani koru)
+                    log.info(f"[D-LIVE] runner geniss-trail backstop (kar={cur_bps:+.0f} <= tepe {peak:.0f}-{trail:.0f}) — kalani kapat")
                     _djx("d_runner_trail"); _mark_protect_exit()
                     await close_position(reason="d_runner_trail")
                     return True

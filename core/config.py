@@ -684,9 +684,11 @@ class Config:
     # Plato 75-90; daha genis SL = az fitil-stop, daha cok trade POC'a ulasir. Kullanici hakli.
     V3_POC_MAXHOLD = int(os.getenv("V3_POC_MAXHOLD", "64"))  # 16->64: genis SL ile poc-donuse zaman (backtest OOS+)
     V3_POC_MACRO_BPS = float(os.getenv("V3_POC_MACRO_BPS", "0"))  # 0=kapali (backtest makrosuz +1935)
-    # D PARTIAL-EXIT (dexit backtest OOS+): poc_revert'te V3_D_PARTIAL_PCT kadar al, kalan
-    # V3_D_RUNNER_TRAIL_BPS trailing ile karda tasi. PCT=1.0 -> eski %100-kapat davranisi.
-    V3_D_PARTIAL_PCT = float(os.getenv("V3_D_PARTIAL_PCT", "0.5"))
+    # D PARTIAL-EXIT: poc_revert'te V3_D_PARTIAL_PCT kadar al, kalan runner (trailing exchange-SL).
+    # GERI ALINDI (1.0=%100-kapat, orijinal): backtest OOS+232 dedi AMA forward A/B (dexit_paper)
+    # FULL +16 vs PARTIAL -82 -> partial forward'da GERIDE. Gercek-para -> full'e donuldu. dexit_paper
+    # A/B'yi olcmeye devam eder; partial forward'da full'u gecmeye baslarsa 0.5'e geri alinabilir.
+    V3_D_PARTIAL_PCT = float(os.getenv("V3_D_PARTIAL_PCT", "1.0"))
     # Runner cikis: TRAILING EXCHANGE-SL (tepe-fiyattan trail_bps geride borsaya tasi, replace_sl_algo).
     # Fiyat lehte gittikce SL pesinden gelir, trend donunce BORSADA kapanir -> bot koparsa bile kar korunur.
     # Backtest: SABIT ~100 en iyi (OOS +1487/toplam +3411); ATR-kati DENENDI, DAHA KOTU (en iyi

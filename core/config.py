@@ -682,7 +682,10 @@ class Config:
     V3_POC_SL_BPS = float(os.getenv("V3_POC_SL_BPS", "90"))  # 60 cok dardi (wick-stop);
     # SL sweep (fee8+slip2,WF): 60 OOS+235 -> 90 OOS+530 (~2x), isabet %42->%50, 4/4.
     # Plato 75-90; daha genis SL = az fitil-stop, daha cok trade POC'a ulasir. Kullanici hakli.
-    V3_POC_MAXHOLD = int(os.getenv("V3_POC_MAXHOLD", "64"))  # 16->64: genis SL ile poc-donuse zaman (backtest OOS+)
+    V3_POC_MAXHOLD = int(os.getenv("V3_POC_MAXHOLD", "200"))  # ~KALDIRILDI (uzak emniyet). SL zaten kaybi
+    # kapiyor (worst -312 maxhold'dan bagimsiz); poc_revert+ters-sinyal ~22 barda dogal kapatiyor. Backtest:
+    # maxhold 128+ = maxhold-YOK (+3235), 64'ten (+3077) ve 16'dan (+2393) IYI -> maxhold reversion-oncesi
+    # zararina kesiyordu (#308). 200=fonksiyonel-yok + feed-glitch emniyeti.
     V3_POC_MACRO_BPS = float(os.getenv("V3_POC_MACRO_BPS", "0"))  # 0=kapali (backtest makrosuz +1935)
     # D PARTIAL-EXIT: poc_revert'te V3_D_PARTIAL_PCT kadar al, kalan runner (trailing exchange-SL).
     # GERI ALINDI (1.0=%100-kapat, orijinal): backtest OOS+232 dedi AMA forward A/B (dexit_paper)

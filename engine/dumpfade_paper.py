@@ -25,9 +25,12 @@ DUMP_PCT = 12.5           # gunluk <=-bu% -> dump
 DUMP_CAP = 30.0           # <=-bu% ise ATLA (rug/delist, fade degil — ilk canli tarama LAB-78%% yakaladi)
 OFFSET_BPS = 300.0        # ertesi gun open'in bu kadar bps ALTINA buy-limit (likidite ver)
 MAKER_FEE = 10.0          # giris+cikis maker (~5+5 bps)
-MIN_QVOL = 50e6           # KALICI likidite: 30-gun ORT quote-vol >= $50M (24h-snapshot degil -> yeni-coin
-                          # hacim patlamasi sizmasin; ilk tarama TRIA/TAC/TAG illikit-yeni sokmustu)
+MIN_QVOL = 5e6            # KALICI likidite: 30-gun ORT quote-vol >= $5M. $50M kurumsal-size icindi; $144
+                          # kucuk-size $5M coini oynatmaz -> yuzlerce coinlik evren, sik olay. Tier-testi:
+                          # 2-5M/5-10M/10-25M/25-50M/50M+ HEPSI p=0.000 TRAIN+OOS+ (kullanici hakli).
+                          # <$5M ATLA (falling-knife/spread riski). 30-gun-ORT (24h-snapshot yeni-coin sokuyordu).
 MIN_DAYS = 60            # yeni-listing haric (>=60 gunluk bar)
+CAND_N = 300            # aday listesi genis (mid-likit coinler top-150'nin altinda kalabiliyor)
 _last_day = 0
 
 
@@ -47,7 +50,7 @@ def _candidates() -> list[str]:
         rows = [(x["symbol"], float(x.get("quoteVolume", 0) or 0)) for x in t
                 if str(x.get("symbol", "")).endswith("USDT")]
         rows.sort(key=lambda z: -z[1])
-        return [s for s, _ in rows[:150]]
+        return [s for s, _ in rows[:CAND_N]]
     except Exception as ex:
         log.warning(f"[DUMPFADE] evren: {ex}")
         return []

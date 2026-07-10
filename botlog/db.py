@@ -354,6 +354,52 @@ def get_open_funding(symbol: str) -> dict | None:
     return None
 
 
+def _migrate_dumpfade_paper(db: sqlite3.Connection) -> None:
+    """Cross-sectional DUMP-FADE maker SHADOW (dumpfade_paper) — gercek emir YOK.
+    Bulgu: likit coin gunluk <=-12.5% dump -> ertesi gun open'in ~3%% ALTINA buy-limit (likidite VER,
+    panigi al) -> gun-sonu kapat. 521-coin/500g backtest likit-alt-kumede: maker-limit +276bps/islem,
+    p=0.000, TRAIN+OOS pozitif (taker/market -6bps OLU -> duvari MAKER deliyor). Cross-sectional MR,
+    D'ye complementary. Amac: canli forward'da gercek limit-dolum + bounce'i dogrula. Kaldirac/stop
+    ayri mesele (worst -38%%). Gunluk bar-bazli, retrospektif (tamamlanan D+1 gununu logla)."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS dumpfade_paper (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            open_ts REAL NOT NULL, open_human TEXT, symbol TEXT,
+            dump_pct REAL, day_open REAL, limit_px REAL, low_px REAL, close_px REAL,
+            filled INTEGER, pnl_bps REAL, status TEXT DEFAULT 'CLOSED', day_key INTEGER
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_dumpfade_ts ON dumpfade_paper(open_ts DESC)")
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_dumpfade_uq ON dumpfade_paper(symbol, day_key)")
+
+
+def log_dumpfade(symbol: str, day_key: int, dump_pct: float, day_open: float, limit_px: float,
+                 low_px: float, close_px: float, filled: bool, pnl_bps: float) -> int:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            cur = db.execute(
+                "INSERT OR IGNORE INTO dumpfade_paper (open_ts,open_human,symbol,dump_pct,day_open,limit_px,"
+                "low_px,close_px,filled,pnl_bps,status,day_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (datetime.now().timestamp(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                 str(symbol), float(dump_pct or 0), float(day_open or 0), float(limit_px or 0),
+                 float(low_px or 0), float(close_px or 0), 1 if filled else 0, float(pnl_bps or 0),
+                 "FILLED" if filled else "MISSED", int(day_key)))
+            return int(cur.lastrowid or 0)
+    except Exception:
+        return 0
+
+
+def dumpfade_seen(symbol: str, day_key: int) -> bool:
+    try:
+        with _conn() as db:
+            r = db.execute("SELECT 1 FROM dumpfade_paper WHERE symbol=? AND day_key=? LIMIT 1",
+                           (str(symbol), int(day_key))).fetchone()
+        return r is not None
+    except Exception:
+        return False
+
+
 def _migrate_dexit_paper(db: sqlite3.Connection) -> None:
     """D CIKIS A/B SHADOW (dexit_paper) — gercek emir YOK. Her canli D sinyalinde HEM full-exit
     (mevcut: poc_revert'te %100 kapat) HEM partial (%50 poc_revert + %50 trailing 40bps) sonucunu
@@ -897,6 +943,7 @@ def init():
         _migrate_xflow_paper(db)
         _migrate_funding_paper(db)
         _migrate_dexit_paper(db)
+        _migrate_dumpfade_paper(db)
         # Orphan temizligi: restart hafizadaki paper pozisyonunu sifirlar, DB satiri
         # "OPEN" kalir -> net'i bozar. Startup'ta acik paper kayitlarini ORPHAN isaretle
         # (CLOSED degil -> net hesabina girmez). Gercek para yok, sadece kayit hijyeni.

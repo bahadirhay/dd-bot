@@ -426,6 +426,14 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
         dexit_tick()
     except Exception:
         pass
+    # DUMP-FADE cross-sectional maker paper (shadow): likit coin gunluk <=-12.5% dump -> ertesi gun
+    # dibe buy-limit (likidite VER) -> maker +276bps/p=0.000 (taker OLU). Illikidite duvarini maker deldi.
+    try:
+        from engine.dumpfade_paper import paper_tick as dumpfade_tick
+
+        dumpfade_tick()
+    except Exception:
+        pass
     # 1h MOMENTUM trend-takip paper (shadow): ilk OOS-pozitif trend yaklasimi (1h N24).
     # D(range) yaninda trend-ayagi adayi; iki-bot vizyonu icin canli dogrulama.
     try:

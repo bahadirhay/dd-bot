@@ -646,12 +646,12 @@ class Config:
     V3_B_BARCLOSE_ENTRY = os.getenv("V3_B_BARCLOSE_ENTRY", "true").lower() in ("1", "true", "yes")
     # Kanal-LONG paper (shadow): destekten donus-teyitli long — gercek emir YOK, sadece
     # kayit. Backtest negatif dedi ama canli veride dogrulamak icin. Birkac gun izle.
-    V3_CHLONG_PAPER = os.getenv("V3_CHLONG_PAPER", "true").lower() in ("1", "true", "yes")
+    V3_CHLONG_PAPER = os.getenv("V3_CHLONG_PAPER", "false").lower() in ("1", "true", "yes")
     V3_CHLONG_SL_BPS = float(os.getenv("V3_CHLONG_SL_BPS", "50"))
     V3_CHLONG_MAXHOLD = int(os.getenv("V3_CHLONG_MAXHOLD", "16"))
     # Istatistiksel-bant A paper: z-score MR (swing-kutu yerine mean+-k*sigma).
     # Backtest: eski A -413 -> +955 (B'yi de gecti). makro sart. gercek emir YOK.
-    V3_STATBAND_PAPER = os.getenv("V3_STATBAND_PAPER", "true").lower() in ("1", "true", "yes")
+    V3_STATBAND_PAPER = os.getenv("V3_STATBAND_PAPER", "false").lower() in ("1", "true", "yes")
     V3_SB_M = int(os.getenv("V3_SB_M", "24"))            # z-score penceresi
     V3_SB_K = float(os.getenv("V3_SB_K", "2.0"))         # sapma esigi (sigma)
     V3_SB_MACRO_BPS = float(os.getenv("V3_SB_MACRO_BPS", "150"))
@@ -662,7 +662,7 @@ class Config:
     # 5m mean-reversion paper (shadow): 5m bar z-score MR — gercek emir YOK.
     # Walk-forward dogrulandi: M72/K2.0/SL60 net +1186, OOS +794 (B'yi gecti).
     # 5m'de mean-reversion edge en guclu (autocorr -0.052, islem-basi +8.9bps).
-    V3_MR5M_PAPER = os.getenv("V3_MR5M_PAPER", "true").lower() in ("1", "true", "yes")
+    V3_MR5M_PAPER = os.getenv("V3_MR5M_PAPER", "false").lower() in ("1", "true", "yes")
     V3_MR5M_M = int(os.getenv("V3_MR5M_M", "72"))            # z-score penceresi (5m bar = 6h)
     V3_MR5M_K = float(os.getenv("V3_MR5M_K", "2.0"))         # sapma esigi (sigma)
     V3_MR5M_MACRO_BPS = float(os.getenv("V3_MR5M_MACRO_BPS", "150"))  # 8h-slope blok
@@ -673,7 +673,14 @@ class Config:
     # Strateji D: Hacim Profili / POC reversion paper (shadow) — gercek emir YOK.
     # 6GB 8-yaklasim testi KAZANANI: net +1935, OOS +1192, 3/4 ceyrek (funding+digerlerini gecti).
     # POC = son M(40) 15m barin hacim-agirlikli ort fiyati; sapma>=DEV_BPS -> fade.
-    V3_POC_PAPER = os.getenv("V3_POC_PAPER", "true").lower() in ("1", "true", "yes")
+    V3_POC_PAPER = os.getenv("V3_POC_PAPER", "false").lower() in ("1", "true", "yes")
+    # RETIRE edilen shadow'lar (forward'da negatif/yaniltici -> susturuldu; kod duruyor, kanit hafizada):
+    # xflow(-423 forward), poc_maker(-188; maker tezi dumpfade'de), poc_atr(SYN-illuzyon YANILTICI),
+    # dexit(gorevi bitti: full>partial). Detay: [[retired-shadows-jul2026]]. Geri acmak: ilgili=true.
+    V3_XFLOW_PAPER = os.getenv("V3_XFLOW_PAPER", "false").lower() in ("1", "true", "yes")
+    V3_POC_MAKER_PAPER = os.getenv("V3_POC_MAKER_PAPER", "false").lower() in ("1", "true", "yes")
+    V3_POC_ATR_PAPER = os.getenv("V3_POC_ATR_PAPER", "false").lower() in ("1", "true", "yes")
+    V3_DEXIT_PAPER = os.getenv("V3_DEXIT_PAPER", "false").lower() in ("1", "true", "yes")
     V3_POC_M = int(os.getenv("V3_POC_M", "40"))                  # POC penceresi (15m bar)
     # DEV=85: walk-forward dogrulandi (fee8+slip2, 15m kapanis): net +1854, OOS +731, 4/4
     # ceyrek, islem-basi +11.7bps (slippage-saglam). DEV50 cok inceydi (slippage'a yenik).

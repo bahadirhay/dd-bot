@@ -19,8 +19,10 @@ log = get_logger("PosMgr")
 def _stale_close_limit() -> float:
     """Feed-bayatliginda market-kapatma esigi. Borsada aktif SL varsa pozisyon ZATEN korumali
     (downside SL ile sinirli) -> gecici feed hickirginda erken kapatma YAPMA (kazancli pozisyonu
-    kesip kar kacirma; #298: +48bps kacti). SL yoksa (acik pozisyon) eski gibi hizli kapat."""
-    has_sl = bool(str(getattr(state, "pos_sl_id", "") or "")) and float(getattr(state, "pos_sl", 0) or 0) > 0
+    kesip kar kacirma; #298: +48bps kacti). SL yoksa (acik pozisyon) eski gibi hizli kapat.
+    NOT: pos_sl_id (emir-ID) RESTART-restore'da kaybolabiliyor -> #310 stale_data ile SL'e degmeden
+    zararina kapandi. Bu yuzden SL-FIYATI (pos_sl>0) yeterli sayilir (fiyat set ise borsada SL vardir)."""
+    has_sl = float(getattr(state, "pos_sl", 0) or 0) > 0
     if has_sl:
         return float(getattr(cfg, "V3_STALE_CLOSE_SEC", 90) or 90)
     return float(getattr(cfg, "V3_STALE_CLOSE_NOSL_SEC", 10) or 10)

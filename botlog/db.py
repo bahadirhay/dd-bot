@@ -354,6 +354,55 @@ def get_open_funding(symbol: str) -> dict | None:
     return None
 
 
+def _migrate_dtime_paper(db: sqlite3.Connection) -> None:
+    """D SAAT-ATRIBUSYON SHADOW (dtime_paper) — gercek emir YOK. Her D sinyalini UTC-saat etiketiyle +
+    full-exit sonucuyla loglar. Bulgu: 6000-bar analiz, US-acilis(13-15 UTC) yuksek-vol/trend (D whipsaw),
+    gece(16,23-02) yuksek-MR (D edge guclu). Backtest zaman-filtresi TRAIN+%17 ama OOS-neutral -> deploy
+    edilmedi, forward'da saat-basi D-net olcup filtre gercekten yariyor mu gorecek."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS dtime_paper (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            open_ts REAL NOT NULL, open_human TEXT, hour INTEGER, side TEXT,
+            entry REAL, pnl_bps REAL, reason TEXT, status TEXT DEFAULT 'OPEN'
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_dtime_ts ON dtime_paper(open_ts DESC)")
+
+
+def log_dtime_open(hour: int, side: str, entry: float) -> int:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            cur = db.execute(
+                "INSERT INTO dtime_paper (open_ts,open_human,hour,side,entry,status) VALUES (?,?,?,?,?, 'OPEN')",
+                (datetime.now().timestamp(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                 int(hour), str(side), float(entry or 0)))
+            return int(cur.lastrowid or 0)
+    except Exception:
+        return 0
+
+
+def close_dtime(rid: int, pnl_bps: float, reason: str) -> None:
+    from datetime import datetime
+    try:
+        with _conn() as db:
+            db.execute("UPDATE dtime_paper SET status='CLOSED', pnl_bps=?, reason=? WHERE id=?",
+                       (float(pnl_bps or 0), str(reason), int(rid)))
+    except Exception:
+        pass
+
+
+def get_open_dtime() -> dict | None:
+    try:
+        with _conn() as db:
+            row = db.execute("SELECT id, side, entry FROM dtime_paper WHERE status='OPEN' ORDER BY id DESC LIMIT 1").fetchone()
+        if row:
+            return {"id": int(row["id"]), "side": str(row["side"]), "entry": float(row["entry"] or 0)}
+    except Exception:
+        pass
+    return None
+
+
 def _migrate_dumpfade_paper(db: sqlite3.Connection) -> None:
     """Cross-sectional DUMP-FADE maker SHADOW (dumpfade_paper) — gercek emir YOK.
     Bulgu: likit coin gunluk <=-12.5% dump -> ertesi gun open'in ~3%% ALTINA buy-limit (likidite VER,
@@ -944,6 +993,7 @@ def init():
         _migrate_funding_paper(db)
         _migrate_dexit_paper(db)
         _migrate_dumpfade_paper(db)
+        _migrate_dtime_paper(db)
         # Orphan temizligi: restart hafizadaki paper pozisyonunu sifirlar, DB satiri
         # "OPEN" kalir -> net'i bozar. Startup'ta acik paper kayitlarini ORPHAN isaretle
         # (CLOSED degil -> net hesabina girmez). Gercek para yok, sadece kayit hijyeni.

@@ -434,6 +434,14 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
         dumpfade_tick()
     except Exception:
         pass
+    # D SAAT-ATRIBUSYON paper (shadow): D sinyallerini UTC-saat + full-exit ile logla -> forward'da
+    # saat-bazli D-net (US-acilis whipsaw / gece MR gercek mi). Deploy degil olcum. Gercek emir YOK.
+    try:
+        from engine.dtime_paper import paper_tick as dtime_tick
+
+        dtime_tick()
+    except Exception:
+        pass
     # 1h MOMENTUM trend-takip paper (shadow): ilk OOS-pozitif trend yaklasimi (1h N24).
     # D(range) yaninda trend-ayagi adayi; iki-bot vizyonu icin canli dogrulama.
     try:

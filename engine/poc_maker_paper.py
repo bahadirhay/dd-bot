@@ -23,11 +23,12 @@ log = get_logger("PocMakerPaper")
 SYMBOL = "ETHUSDT"          # canli D ile A/B icin ETH
 M = 40
 DEV = 85.0
-SL = 90.0
-MHOLD = 16
+SL = 300.0                 # canli D ile hizali (ATR-SL ~300)
+MHOLD = 64
 OFFSET = 5.0               # limit, kapanistan bu kadar bps uzakta (LONG alt / SHORT ust)
 FILL_WINDOW = 3            # bar; bu kadar barda dolmazsa MISS
-MAKER_COST = 8.0          # ~2bps maker giris + 5bps taker cikis + 1 slip (taker~12 idi)
+MAKER_COST = 8.0          # maker giris + taker cikis + slip
+TAKER_COST = 12.0        # market-giris A/B (taker round-trip) — maker vs market farkini olcer
 
 _pending: dict | None = None   # {id,side,sig,lim,waited}
 _pos: dict | None = None       # {id,side,fill,held}
@@ -91,7 +92,7 @@ def _restore() -> None:
         if row["status"] == "PENDING":
             _pending = {"id": row["id"], "side": row["side"], "sig": row["sig"], "lim": row["lim"], "waited": 0}
         elif row["status"] == "FILLED":
-            _pos = {"id": row["id"], "side": row["side"], "fill": row["fill"] or row["lim"], "held": 0}
+            _pos = {"id": row["id"], "side": row["side"], "fill": row["fill"] or row["lim"], "sig": row["sig"] or row["fill"] or row["lim"], "held": 0}
         log.info(f"[MAKER] restore: {row['status']} {row['side']} (id={row['id']})")
     except Exception as ex:
         log.warning(f"[MAKER] restore: {ex}")
@@ -118,22 +119,26 @@ def paper_tick() -> None:
         return
     dev = (c - pc) / pc * 1e4
 
-    # 1) ACIK pozisyon -> cikis yonet
+    # 1) ACIK pozisyon -> cikis yonet. A/B: market-giris(sig_px, taker) counterfactual da loglanir.
     if _pos:
-        side = _pos["side"]; fill = _pos["fill"]; _pos["held"] += 1
+        side = _pos["side"]; fill = _pos["fill"]; sig = _pos.get("sig") or fill; _pos["held"] += 1
         cur = ((c - fill) if side == "LONG" else (fill - c)) / fill * 1e4
         adv = ((fill - l) if side == "LONG" else (h - fill)) / fill * 1e4
+        # market-giris (sig_px) ayni cikisa: (poc_revert/maxhold -> c ; sl -> tam-SL) - taker
+        mkt_cur = ((c - sig) if side == "LONG" else (sig - c)) / sig * 1e4
         if adv >= SL:
             update_maker_status(_pos["id"], "CLOSED", exit_px=fill * (1 - SL / 1e4) if side == "LONG" else fill * (1 + SL / 1e4),
-                                pnl_bps=round(-SL - MAKER_COST, 1), reason="sl")
+                                pnl_bps=round(-SL - MAKER_COST, 1), reason="sl", market_bps=round(-SL - TAKER_COST, 1))
             log.info(f"[MAKER] SL {side} -{SL:.0f}bps")
             _pos = None
         elif _poc_reverted(side) and cur >= 0:
-            update_maker_status(_pos["id"], "CLOSED", exit_px=c, pnl_bps=round(cur - MAKER_COST, 1), reason="poc_revert")
-            log.info(f"[MAKER] POC-donus {side} +{cur:.0f}bps (net {cur-MAKER_COST:+.0f})")
+            update_maker_status(_pos["id"], "CLOSED", exit_px=c, pnl_bps=round(cur - MAKER_COST, 1), reason="poc_revert",
+                                market_bps=round(mkt_cur - TAKER_COST, 1))
+            log.info(f"[MAKER] POC-donus {side} maker +{cur:.0f} vs market +{mkt_cur:.0f}bps")
             _pos = None
         elif _pos["held"] >= MHOLD:
-            update_maker_status(_pos["id"], "CLOSED", exit_px=c, pnl_bps=round(cur - MAKER_COST, 1), reason="maxhold")
+            update_maker_status(_pos["id"], "CLOSED", exit_px=c, pnl_bps=round(cur - MAKER_COST, 1), reason="maxhold",
+                                market_bps=round(mkt_cur - TAKER_COST, 1))
             _pos = None
         return
 
@@ -143,7 +148,7 @@ def paper_tick() -> None:
         filled = (l <= lim) if side == "LONG" else (h >= lim)
         if filled:
             update_maker_status(_pending["id"], "FILLED", fill_px=lim)
-            _pos = {"id": _pending["id"], "side": side, "fill": lim, "held": 0}
+            _pos = {"id": _pending["id"], "side": side, "fill": lim, "sig": _pending.get("sig") or lim, "held": 0}
             log.info(f"[MAKER] FILLED {side} @{lim:.2f} (limit doldu)")
             _pending = None
         elif _pending["waited"] >= FILL_WINDOW:

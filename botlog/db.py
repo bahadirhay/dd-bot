@@ -175,6 +175,10 @@ def _migrate_maker_paper(db: sqlite3.Connection) -> None:
         )
     """)
     db.execute("CREATE INDEX IF NOT EXISTS idx_maker_ts ON poc_maker_paper(open_ts DESC)")
+    try:  # A/B: ayni sinyalde MARKET-giris karsilastirmasi (maker vs market net)
+        db.execute("ALTER TABLE poc_maker_paper ADD COLUMN market_bps REAL DEFAULT 0")
+    except Exception:
+        pass
 
 
 def log_maker_open(symbol: str, side: str, sig_px: float, lim_px: float) -> int:
@@ -192,7 +196,8 @@ def log_maker_open(symbol: str, side: str, sig_px: float, lim_px: float) -> int:
 
 
 def update_maker_status(rid: int, status: str, fill_px: float = 0.0,
-                        exit_px: float = 0.0, pnl_bps: float = 0.0, reason: str = "") -> None:
+                        exit_px: float = 0.0, pnl_bps: float = 0.0, reason: str = "",
+                        market_bps: float = 0.0) -> None:
     from datetime import datetime
     try:
         with _conn() as db:
@@ -203,8 +208,8 @@ def update_maker_status(rid: int, status: str, fill_px: float = 0.0,
                 db.execute("UPDATE poc_maker_paper SET status='MISSED', close_ts=? WHERE id=?",
                            (datetime.now().timestamp(), int(rid)))
             elif status == "CLOSED":
-                db.execute("UPDATE poc_maker_paper SET status='CLOSED', close_ts=?, exit=?, pnl_bps=?, reason=? WHERE id=?",
-                           (datetime.now().timestamp(), float(exit_px or 0), float(pnl_bps or 0), str(reason), int(rid)))
+                db.execute("UPDATE poc_maker_paper SET status='CLOSED', close_ts=?, exit=?, pnl_bps=?, reason=?, market_bps=? WHERE id=?",
+                           (datetime.now().timestamp(), float(exit_px or 0), float(pnl_bps or 0), str(reason), float(market_bps or 0), int(rid)))
     except Exception:
         pass
 

@@ -678,7 +678,8 @@ class Config:
     # xflow(-423 forward), poc_maker(-188; maker tezi dumpfade'de), poc_atr(SYN-illuzyon YANILTICI),
     # dexit(gorevi bitti: full>partial). Detay: [[retired-shadows-jul2026]]. Geri acmak: ilgili=true.
     V3_XFLOW_PAPER = os.getenv("V3_XFLOW_PAPER", "false").lower() in ("1", "true", "yes")
-    V3_POC_MAKER_PAPER = os.getenv("V3_POC_MAKER_PAPER", "false").lower() in ("1", "true", "yes")
+    V3_POC_MAKER_PAPER = os.getenv("V3_POC_MAKER_PAPER", "true").lower() in ("1", "true", "yes")  # yeniden acildi:
+    # kullanici canli 5-10pip-aleyhe gozlemi -> maker-giris(daha iyi fiyat) temiz A/B ile forward-olcum
     V3_POC_ATR_PAPER = os.getenv("V3_POC_ATR_PAPER", "false").lower() in ("1", "true", "yes")
     V3_DEXIT_PAPER = os.getenv("V3_DEXIT_PAPER", "false").lower() in ("1", "true", "yes")
     V3_POC_M = int(os.getenv("V3_POC_M", "40"))                  # POC penceresi (15m bar)

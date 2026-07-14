@@ -66,7 +66,8 @@ def _daily(sym: str, limit: int = 66):
 
 
 def paper_tick() -> None:
-    """Gunluk bir kez: likit evreni tara, tamamlanan dump-fade (D dump, D+1 fill/exit) logla."""
+    """Gunluk bir kez tarama -> AYRI THREAD'de (senkron urllib ~150 coin event-loop'u BLOKLAMASIN;
+    aksi halde 00:00 UTC'de feed donar -> D pozisyonu stale_data ile kapanirdi). Gercek emir YOK."""
     global _last_day
     if not bool(getattr(cfg, "V3_DUMPFADE_PAPER", True)):
         return
@@ -74,6 +75,12 @@ def paper_tick() -> None:
     if dk == _last_day:
         return
     _last_day = dk
+    import threading
+    threading.Thread(target=_run_scan, name="dumpfade-scan", daemon=True).start()
+
+
+def _run_scan() -> None:
+    """~150-240 coini tara (senkron urllib); AYRI thread'de calisir -> event-loop bloklanmaz."""
     try:
         from botlog.db import log_dumpfade, dumpfade_seen
     except Exception:

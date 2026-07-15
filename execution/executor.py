@@ -221,7 +221,8 @@ async def fetch_realized_pnl_since(open_ts: float) -> float | None:
     if not open_ts or open_ts <= 0:
         return None
     start = int(max(open_ts - 5.0, 0) * 1000)
-    for attempt in range(3):
+    attempts = 5
+    for attempt in range(attempts):
         try:
             inc = await _req(
                 "GET", "/fapi/v1/income",
@@ -231,17 +232,23 @@ async def fetch_realized_pnl_since(open_ts: float) -> float | None:
             inc = None
         if isinstance(inc, list):
             total = 0.0
-            seen = False
+            seen_realized = False
+            seen_commission = False
             for x in inc:
                 it = x.get("incomeType")
                 if it in ("REALIZED_PNL", "COMMISSION", "FUNDING_FEE"):
                     total += float(x.get("income") or 0)
                     if it == "REALIZED_PNL":
-                        seen = True
-            if seen:
+                        seen_realized = True
+                    elif it == "COMMISSION":
+                        seen_commission = True
+            # REALIZED_PNL komisyondan ONCE gelir -> yalniz onu gorup donersek komisyonu
+            # eksik sayar, zarari OLDUGUNDAN AZ gosterir (#317: -0.0096 vs gercek -0.03).
+            # Taker kapanisinda komisyon HER ZAMAN olusur -> ikisini de bekle.
+            if seen_realized and seen_commission:
                 return round(total, 4)
-        if attempt < 2:
-            await asyncio.sleep(1.0)  # income kaydi kapanistan biraz sonra gelir
+        if attempt < attempts - 1:
+            await asyncio.sleep(1.5)  # income satirlari (ozellikle komisyon) kapanistan biraz sonra gelir
     return None
 
 

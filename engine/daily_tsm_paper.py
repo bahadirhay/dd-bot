@@ -29,6 +29,15 @@ _last_day = 0
 _blocked = 0            # SL sonrasi bloklu yon (+1 LONG / -1 SHORT); sinyal donunce kalkar
 _bars_cache: tuple[int, list] = (0, [])
 
+# PER-COIN felaket-SL (bps). scripts/_f_percoin.py: yalniz guclu intraday-MR coinleri stop'tan
+# ROBUST fayda gorur (ETH 3/4 ceyrek, SOL 4/4 ceyrek flip-only'i gecti + DD belirgin dusuk).
+# BTC/BNB/XRP haritada YOK -> flip-only (stop onlarda whipsaw/mega-trend keser). Cok-coine
+# gecince yeni coini once _f_percoin.py ile sina, oyle ekle (kor curve-fit DEGIL).
+_SL_BY_SYMBOL: dict[str, float] = {
+    "ETHUSDT": 300.0,
+    "SOLUSDT": 300.0,
+}
+
 
 def _bar_id() -> int:
     return int(time.time() // 86400)  # gunluk
@@ -96,7 +105,10 @@ def paper_tick() -> None:
     sig = "LONG" if mom > 0 else "SHORT"
     want = 1 if mom > 0 else -1
     fee = 3.0
-    sl_bps = float(getattr(cfg, "V3_FTSM_SL_BPS", 0) or 0)
+    # PER-COIN SL (scripts/_f_percoin.py, 4-ceyrek bagimsiz WF): SADECE guclu intraday-MR
+    # coinleri stop'tan robust fayda gorur -> ETH SL300 (3/4 ceyrek + DD dusuk), SOL SL300 (4/4).
+    # BTC/BNB/XRP flip-only (stop whipsaw/mega-trend keser). Haritada olmayan coin -> global default.
+    sl_bps = _SL_BY_SYMBOL.get(sym, float(getattr(cfg, "V3_FTSM_SL_BPS", 0) or 0))
     trail_bps = float(getattr(cfg, "V3_FTSM_TRAIL_BPS", 0) or 0)
     # son KAPANMIS gunun H/L'i (SL/trail bu gunun asiri hareketiyle test edilir)
     d_high, d_low, d_close = bars[-1]

@@ -743,11 +743,12 @@ class Config:
     V3_FTSM_PAPER = os.getenv("V3_FTSM_PAPER", "true").lower() in ("1", "true", "yes")
     V3_FTSM_N = int(os.getenv("V3_FTSM_N", "40"))            # gunluk geri-bakis (gun)
     V3_FTSM_SYMBOL = os.getenv("V3_FTSM_SYMBOL", "ETHUSDT")
-    # DD-koruma (scripts/_f_protect2.py, 5-coin WF): felaket-SL 5-coinde maxDD DUSURUR;
-    # 500bps -1144 gibi derin kaybi keser, ETH baseline'i gecer. trail karda kilitler,
-    # risk-ayarini her coinde iyilestirir (ama bastan-zararli pozisyonu kesmez -> SL sart).
-    V3_FTSM_SL_BPS = float(os.getenv("V3_FTSM_SL_BPS", "500"))      # 0 = kapali (eski flip-only)
-    V3_FTSM_TRAIL_BPS = float(os.getenv("V3_FTSM_TRAIL_BPS", "500"))  # 0 = kapali
+    # DD-koruma: VARSAYILAN KAPALI (flip-only). scripts/_f_protect3.py 5-coin WF ile stop
+    # (sabit-bps VE ATR-carpani) capraz-coinde SAGLAM fayda VERMEDI; ETH kazanci ETH-ozeldi
+    # (SL500 BTC/SOL/XRP OOS getirisini kirpti). ATR-mult 4-6x hic tetiklenmez, 2-3x whipsaw.
+    # F'in DD cozumu STOP DEGIL CESITLENDIRME. Kod duruyor (ETH-only'e donersek acilabilir).
+    V3_FTSM_SL_BPS = float(os.getenv("V3_FTSM_SL_BPS", "0"))        # 0 = kapali (flip-only, dogrulanmis saf F)
+    V3_FTSM_TRAIL_BPS = float(os.getenv("V3_FTSM_TRAIL_BPS", "0"))  # 0 = kapali
     # Reverse (flip) sinyal için min SHORT/LONG olasılık eşiği
     V3_REVERSE_MIN_SCORE_PROB = float(os.getenv("V3_REVERSE_MIN_SCORE_PROB", "55.0"))
     # Swing high fallback için min RR (normal RR'den daha gevşek olabilir)

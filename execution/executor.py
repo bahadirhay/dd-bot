@@ -252,6 +252,60 @@ async def fetch_realized_pnl_since(open_ts: float) -> float | None:
     return None
 
 
+async def _income_net_in_window(open_ts: float, close_ts: float) -> float | None:
+    """Bir trade'in TAM omru (open_ts..close_ts) icinde borsadaki net income toplami.
+    Kapali/settled trade icin: coklu-parca kapanista TUM realized+komisyon+funding satirlari
+    artik gelmis olur -> erken donmez, hepsini toplar. None = income yok/hata."""
+    if not open_ts or open_ts <= 0:
+        return None
+    start = int(max(open_ts - 5.0, 0) * 1000)
+    end = int((close_ts + 120.0) * 1000) if close_ts and close_ts > 0 else None
+    params = {"symbol": cfg.SYMBOL, "startTime": start, "limit": 1000}
+    if end:
+        params["endTime"] = end
+    try:
+        inc = await _req("GET", "/fapi/v1/income", params)
+    except Exception:
+        return None
+    if not isinstance(inc, list):
+        return None
+    total = 0.0
+    seen = False
+    for x in inc:
+        it = x.get("incomeType")
+        if it in ("REALIZED_PNL", "COMMISSION", "FUNDING_FEE"):
+            total += float(x.get("income") or 0)
+            if it == "REALIZED_PNL":
+                seen = True
+    return round(total, 4) if seen else None
+
+
+async def reconcile_recent_pnl(lookback_hours: float = 6.0) -> int:
+    """Son N saatte kapanmis, Binance ile henuz dogrulanmamis CANLI trade'lerin pnl'ini
+    income'dan gercek degere ceker (kapanistaki yaris/gecikme sonrasi kesin senkron).
+    Dashboard boylece Binance ile birebir kalir. Returns: duzeltilen kayit sayisi."""
+    if is_paper_mode() or not cfg.API_KEY:
+        return 0
+    try:
+        from botlog.db import get_unconfirmed_closed_trades, confirm_trade_pnl
+    except Exception:
+        return 0
+    since = time.time() - lookback_hours * 3600
+    rows = get_unconfirmed_closed_trades(since)
+    fixed = 0
+    for t in rows:
+        real = await _income_net_in_window(t.get("open_ts") or 0, t.get("close_ts") or 0)
+        if real is None:
+            continue  # income henuz gelmemis -> sonraki tur tekrar dener
+        entry = float(t.get("entry_price") or 0)
+        qty = float(t.get("qty") or 0)
+        changed = confirm_trade_pnl(t["id"], real, entry, qty)
+        if changed:
+            fixed += 1
+            log.info(f"PnL reconcile: #{t['id']} {float(t.get('pnl') or 0):+.4f} -> {real:+.4f} USDT (binance)")
+    return fixed
+
+
 async def restore_exchange_position_on_startup() -> None:
     """Restart sonrası borsa pozisyonu + DB trade kaydı senkronu."""
     from execution.account_sync import reconcile_startup_exchange

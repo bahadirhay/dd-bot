@@ -46,6 +46,7 @@ def _migrate_trades_learning_columns(db: sqlite3.Connection) -> None:
         "sl_bps": "REAL",              # giris->SL mesafesi (bps)
         "mfe_bps": "REAL",             # max lehte hareket (bps) — kapanista
         "mae_bps": "REAL",             # max aleyhte hareket (bps) — kapanista
+        "pnl_confirmed": "INTEGER",    # 1 = pnl Binance income ile birebir dogrulandi (reconcile)
     }
     for name, typ in add.items():
         if name not in cols:
@@ -1612,6 +1613,41 @@ def log_trade_close(trade_id: int, data: dict):
                 be_activated= :be_activated
             WHERE id = :id
         """, data)
+
+
+def get_unconfirmed_closed_trades(since_ts: float) -> list[dict]:
+    """Binance income ile HENUZ dogrulanmamis, since_ts'ten beri kapanmis CANLI trade'ler.
+    reconcile pnl icin: her biri open_ts..close_ts penceresinde income'dan gercek net alir."""
+    try:
+        with _conn() as db:
+            rows = db.execute(
+                """SELECT id, direction, entry_price, qty, open_ts, close_ts, pnl
+                   FROM trades
+                   WHERE status='CLOSED' AND close_ts >= ?
+                     AND (pnl_confirmed IS NULL OR pnl_confirmed = 0)
+                   ORDER BY close_ts ASC""",
+                (float(since_ts),),
+            ).fetchall()
+            return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def confirm_trade_pnl(trade_id: int, real_pnl: float, entry: float, qty: float) -> bool:
+    """Trade pnl'ini Binance income gercek degerine set eder ve pnl_confirmed=1 isaretler.
+    Returns True eger deger degistiyse (log icin)."""
+    try:
+        with _conn() as db:
+            cur = db.execute("SELECT pnl FROM trades WHERE id=?", (int(trade_id),)).fetchone()
+            old = float(cur["pnl"]) if cur and cur["pnl"] is not None else None
+            pct = round(real_pnl / (entry * qty) * 100, 3) if entry > 0 and qty > 0 else 0.0
+            db.execute(
+                "UPDATE trades SET pnl=?, pnl_pct=?, pnl_confirmed=1 WHERE id=?",
+                (round(float(real_pnl), 4), pct, int(trade_id)),
+            )
+            return old is None or abs(old - real_pnl) > 1e-4
+    except Exception:
+        return False
 
 
 def log_sr_change(data: dict) -> None:

@@ -175,7 +175,12 @@ async def _on_entry_confirmed(details: dict):
         if getattr(cfg, "STRATEGY_V3_ENABLED", False):
             from engine.no_trade_log_v3 import log_execute_block
 
-            log_execute_block("daily_loss_guard", "gunluk kayip limiti", source="entry")
+            log_execute_block(
+                "daily_loss_guard",
+                "gunluk kayip limiti",
+                source="entry",
+                details=details,
+            )
         else:
             log.warning("execute_entry: günlük limit → giriş iptal")
         return
@@ -184,7 +189,12 @@ async def _on_entry_confirmed(details: dict):
     if getattr(cfg, "STRATEGY_V3_ENABLED", False) and is_v3_stale():
         from engine.no_trade_log_v3 import log_execute_block
 
-        log_execute_block("v3_stale", "V3 guncelleme hatasi veya timeout", source="entry")
+        log_execute_block(
+            "v3_stale",
+            "V3 guncelleme hatasi veya timeout",
+            source="entry",
+            details=details,
+        )
         return
 
     # YENİ: UNCLEAR yapıda azaltılmış risk
@@ -281,6 +291,24 @@ async def _account_sync_loop():
                 log.debug(f"Account sync: {e}")
         try:
             await asyncio.wait_for(wait_stop(), timeout=5.0)
+            break
+        except asyncio.TimeoutError:
+            pass
+
+
+async def _pnl_reconcile_loop():
+    """Canli: son kapanmis trade'lerin pnl'ini Binance income ile birebir senkron tutar.
+    Kapanistaki coklu-parca/gecikme yarisindan sonra kesin dogru deger yazilir -> panel = Binance."""
+    await asyncio.sleep(20)
+    while not is_stopping():
+        if not is_paper_mode() and cfg.API_KEY:
+            try:
+                from execution.executor import reconcile_recent_pnl
+                await reconcile_recent_pnl()
+            except Exception as e:
+                log.debug(f"PnL reconcile: {e}")
+        try:
+            await asyncio.wait_for(wait_stop(), timeout=120.0)
             break
         except asyncio.TimeoutError:
             pass
@@ -411,12 +439,17 @@ async def _main_loop():
                     from execution.protection_orders import (
                         maybe_adjust_open_tp,
                         maybe_refresh_v3_channel_tp1,
+                        maybe_repair_v3_tp1_too_close,
                         maybe_restore_entry_tp1,
                     )
 
                     await maybe_restore_entry_tp1(
                         force=True,
                         reason="Backfill sonrasi TP1 giris onarimi",
+                    )
+                    await maybe_repair_v3_tp1_too_close(
+                        force=True,
+                        reason="Backfill sonrasi V3 TP1 min mesafe",
                     )
                     await maybe_adjust_open_tp(
                         force=True,
@@ -596,6 +629,7 @@ async def _main_loop():
         _spawn_worker("accountSync", _account_sync_loop),
         _spawn_worker("journal", _journal_loop),
         _spawn_worker("regime", _regime_loop),
+        _spawn_worker("pnlReconcile", _pnl_reconcile_loop),
     ])
 
     stop_task = asyncio.create_task(wait_stop(), name="stop")

@@ -265,7 +265,12 @@ async def _maybe_protective_exit() -> bool:
             from execution.executor import close_position, close_partial
 
             cur_bps = ((entry - mark) if side == "SHORT" else (mark - entry)) / entry * 1e4
-            min_prof = float(getattr(cfg, "V3_B_REVERT_MIN_PROFIT_BPS", 0.0) or 0.0)
+            # D'ye OZEL min-kar esigi (B'nin paylasilan config'ini bozma). Esik 0 iken poc_revert
+            # brut +4bps'te tetikleniyordu -> round-trip fee (~7-10bps) karsilanmadigi icin NET ZARAR
+            # (#319 brut+4 -> net -0.029; #317 brut+3 -> net -0.033). Esik = fee + kucuk pay.
+            # scripts/_d_min_profit.py (18000 bar WF): cur>=12 HEM TRAIN (-6.0 vs -7.2) HEM OOS
+            # (+12.7 vs +11.1) baseline'i gecti. Mekanik gerekce: maliyetini cikarmayan cikisi yapma.
+            min_prof = float(getattr(cfg, "V3_POC_REVERT_MIN_PROFIT_BPS", 12.0) or 0.0)
             mh_bars = int(getattr(cfg, "V3_POC_MAXHOLD", 16) or 16)
             age_bars = (time.time() - float(getattr(state, "pos_open_ts", 0) or 0)) / 900
             # PARTIAL-EXIT (dexit backtest OOS+): poc_revert'te %pct al, kalan %(1-pct)'yi

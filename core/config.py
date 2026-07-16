@@ -637,6 +637,12 @@ class Config:
     # Backtest: FULL-close +1197 > %50+runner +1090, tepe-yakalama %30->%46. Kapi (kar>=0)
     # yatay-surunmede sahte z=0'da ZARARLA kapatmayi onler (bedelsiz: +1197 ile birebir).
     V3_B_REVERT_MIN_PROFIT_BPS = float(os.getenv("V3_B_REVERT_MIN_PROFIT_BPS", "0.0"))
+    # D'ye OZEL poc_revert min-kar kapisi (B'ninkinden AYRI). Esik 0 iken D brut +4bps'te
+    # cikip round-trip fee'yi (~7-10bps) karsilamayarak NET ZARAR yaziyordu (#319 brut+4 ->
+    # net -0.029; #317 brut+3 -> net -0.033). 12 = fee + kucuk pay; keyfi degil MUHASEBE.
+    # scripts/_d_min_profit.py (18000 bar WF): cur>=12 HEM TRAIN (-6.0 vs -7.2) HEM OOS
+    # (+12.7 vs +11.1) baseline'i gecer; >=20 OOS'ta bozulur -> 12 secildi.
+    V3_POC_REVERT_MIN_PROFIT_BPS = float(os.getenv("V3_POC_REVERT_MIN_PROFIT_BPS", "12.0"))
     # B GIRIS-TUTARLILIK: kompozit sinyalde fiyat-z de yonu teyit etsin (|px_z|>=coh).
     # Fiyat ortalamasinda iken acilan -> aninda mean-revert cikisi (0-1dk churn) engellenir.
     # Backtest: net +1293->+1330, 4/4 ceyrek, OOS pozitif. 0=kapali.

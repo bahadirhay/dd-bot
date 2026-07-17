@@ -734,9 +734,18 @@ class Config:
     # 300->900: ATR-SL (~300, tavan 400) ile RR=far/sl>=2 kalsin ki RR-kapisi D'yi reddetmesin. TP zaten fire etmez.
     # ATR-tabanli SL (vol-normalize): sabit bps yerine oynakliga uyar. clamp(mult*ATR14, floor, ceil).
     V3_POC_SL_ATR_ENABLED = os.getenv("V3_POC_SL_ATR_ENABLED", "true").lower() in ("1", "true", "yes")
-    V3_POC_SL_ATR_MULT = float(os.getenv("V3_POC_SL_ATR_MULT", "7.5"))    # ~sabit 300'e denk (ATR-medyan 40)
-    V3_POC_SL_ATR_FLOOR = float(os.getenv("V3_POC_SL_ATR_FLOOR", "180"))  # ultra-sakinde cok dar olmasin
-    V3_POC_SL_ATR_CEIL = float(os.getenv("V3_POC_SL_ATR_CEIL", "400"))    # vol spike'inda tail kapagi
+    # ATR periyodu 14 (15m -> 3.5h) DOGRULANDI: 4-ceyrek WF'de 14 > 25 > 50 > 96 monotonik.
+    # Sebep: ATR ufku islem ufkuna uymali (D ort ~5h tutuyor); ATR96=24h islemin gordugu
+    # volatiliteyle alakasiz. Carpan 7.5 de yerinde (ATR14 medyan 39bps -> ~293bps SL).
+    V3_POC_SL_ATR_MULT = float(os.getenv("V3_POC_SL_ATR_MULT", "7.5"))
+    # CLAMP = sonuca konan alt/ust sinir (ATR'ye DOKUNMAZ). Eski (180,400) 4-ceyrek toplamda
+    # NET NEGATIF (-2776): taban 180 sakin piyasada SL'i asiri daraltip vurduruyor (#322: SL
+    # 202 -> vuruldu, sonra fiyat TOPARLADI); tavan 400 ise oynak donemde tam genislik
+    # gerekirken kirpiyordu (#318/#321 ~400'e kirpildi). (300,600) -> toplam ~0, 3/4 ceyrekte
+    # daha iyi. Sabit-SL testi de ayni yonu gosterdi (500>300). Duzeltme, kurtarma DEGIL:
+    # D hala marjinal, kotu rejimde (Q2) hala negatif.
+    V3_POC_SL_ATR_FLOOR = float(os.getenv("V3_POC_SL_ATR_FLOOR", "300"))
+    V3_POC_SL_ATR_CEIL = float(os.getenv("V3_POC_SL_ATR_CEIL", "600"))
     # D REJIM kapisi (TRENDDE DUR): efficiency-ratio >= esik ise isleme girme. Trend-bleed
     # korumasi; dogrulandi kaybi kazanctan cok azaltir (+1718 vs +1590), olcek icin kritik.
     V3_POC_ER_GATE = float(os.getenv("V3_POC_ER_GATE", "0.50"))  # 0=kapali

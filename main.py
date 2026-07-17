@@ -284,18 +284,21 @@ async def _account_sync_loop():
                 from execution.paper import _mark_unrealized
                 _mark_unrealized()
         elif cfg.API_KEY:
-            try:
-                from execution.account_sync import refresh_account_snapshot
-                await refresh_account_snapshot()
-            except Exception as e:
-                log.debug(f"Account sync: {e}")
-            # MAKER giris: bekleyen limit doldu mu / suresi doldu mu (5sn'de bir yoklanir;
-            # dolum ile SL'in konmasi arasindaki korumasiz pencere bu kadar kisa tutulur)
+            # SIRA KRITIK: maker dolumunu account_sync'ten ONCE isle. Aksi halde limit
+            # dolunca borsada beliren pozisyonu account_sync "bilinmeyen" sanip KENDI
+            # trade kaydini acar, ardindan _finalize_entry IKINCI kaydi acar -> ciftlenme
+            # (#324 superseded_by_new_open, hayalet -0.0508). Borsa tarafi etkilenmiyordu
+            # ama DB/istatistik kirleniyordu.
             try:
                 from execution.executor import poll_pending_entry
                 await poll_pending_entry()
             except Exception as e:
                 log.debug(f"Maker poll: {e}")
+            try:
+                from execution.account_sync import refresh_account_snapshot
+                await refresh_account_snapshot()
+            except Exception as e:
+                log.debug(f"Account sync: {e}")
         try:
             await asyncio.wait_for(wait_stop(), timeout=5.0)
             break

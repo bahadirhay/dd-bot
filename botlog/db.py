@@ -53,6 +53,34 @@ def _migrate_trades_learning_columns(db: sqlite3.Connection) -> None:
             db.execute(f"ALTER TABLE trades ADD COLUMN {name} {typ}")
 
 
+def _migrate_maker_fill(db: sqlite3.Connection) -> None:
+    """GERCEK maker-limit dolum olcumu. Backtest/shadow 'degdi=doldu' varsayar; gercek
+    kuyruk sirasini YALNIZ bu tablo gosterir. Karar kurali: fill>=%90 kalici, <%85 geri al."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS maker_fill (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts REAL NOT NULL, ts_human TEXT, direction TEXT,
+            limit_px REAL, fill_px REAL, waited_sec REAL, filled INTEGER
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_maker_fill_ts ON maker_fill(ts DESC)")
+
+
+def log_maker_fill_event(direction: str, limit_px: float, fill_px: float,
+                         waited: float, filled: bool) -> None:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            db.execute(
+                "INSERT INTO maker_fill (ts,ts_human,direction,limit_px,fill_px,waited_sec,filled)"
+                " VALUES (?,?,?,?,?,?,?)",
+                (time.time(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                 str(direction), float(limit_px or 0), float(fill_px or 0),
+                 float(waited or 0), 1 if filled else 0))
+    except Exception:
+        pass
+
+
 def _migrate_box_log(db: sqlite3.Connection) -> None:
     """Adaptif kutu kararlarini kaydeden tablo (her adim izlenebilsin)."""
     db.execute("""
@@ -985,6 +1013,7 @@ def init():
         _migrate_v3_attribution_columns(db)
         _migrate_trades_learning_columns(db)
         _migrate_box_log(db)
+        _migrate_maker_fill(db)
         _migrate_b_paper(db)
         _migrate_chlong_paper(db)
         _migrate_statband_paper(db)

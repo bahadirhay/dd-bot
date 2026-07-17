@@ -539,14 +539,19 @@ async def _open_position_live(plan: Plan, signal_id: int = 0) -> bool:
             state.no_entry_reason = reason
             return False
 
+        # MAKER-limit giris (D): fee tasarrufu + daha iyi fiyat. Dolmazsa islem ATLANIR.
+        # Kapali ise (veya bekleyen emir varsa) eski MARKET yolu.
+        if bool(getattr(cfg, "V3_D_MAKER_ENTRY", False)) and not is_paper_mode():
+            if _pending_entry is not None:
+                log.info("Maker: zaten bekleyen giris emri var — yeni sinyal atlandi")
+                return False
+            return await _execute_maker_entry(plan, signal_id)
         return await _execute_market_entry(plan, signal_id)
     finally:
         _opening_direction = ""
 
 
 async def _execute_market_entry(plan: Plan, signal_id: int) -> bool:
-    global _trade_id
-
     side = "BUY" if plan.direction == "LONG" else "SELL"
     cside = "SELL" if plan.direction == "LONG" else "BUY"
 
@@ -589,6 +594,15 @@ async def _execute_market_entry(plan: Plan, signal_id: int) -> bool:
         log.error("Giriş fiyatı alınamadı — emir iptal edilmiş sayılır")
         return False
     oid = str(r.get("orderId", ""))
+
+    return await _finalize_entry(plan, signal_id, fill, oid)
+
+
+async def _finalize_entry(plan: Plan, signal_id: int, fill: float, oid: str) -> bool:
+    """Dolum SONRASI kurulum: state + borsa korumasi (SL/TP) + DB kaydi.
+    MARKET girisinden de MAKER-limit dolumundan da AYNI sekilde cagrilir
+    (maker yolu bu fonksiyonu poll_pending_entry icinden cagirir)."""
+    global _trade_id
 
     state.in_position = True
     state.pos_side = plan.direction
@@ -720,6 +734,166 @@ async def _execute_market_entry(plan: Plan, signal_id: int) -> bool:
     except Exception:
         pass
     return True
+
+
+# ─────────────── MAKER-LIMIT GIRIS (D) ───────────────
+# Neden: D'nin brut edge'i ince (~+6..16bps) ve taker round-trip ~10bps onu yiyor.
+# Maker (GTX post-only) girisi: fee tasarrufu + OFFSET kadar daha iyi fiyat.
+# scripts/_d_maker_vs_market.py (18000 bar WF, TERS SECILIM DAHIL): gercekci dolum
+# modelinde (fiyat limitin ~1-2bps icinden gecmeli) TRAIN +730 / OOS +726 bps.
+# Emir boyutumuz (~0.027 ETH) seviye derinliginin %0.0014'u -> KISMI DOLUM pratikte yok.
+# Dolmazsa KOVALAMA YOK: iptal + islemi atla (backtest edilen davranis birebir bu).
+_pending_entry: dict | None = None
+
+
+def has_pending_entry() -> bool:
+    return _pending_entry is not None
+
+
+async def _execute_maker_entry(plan: Plan, signal_id: int) -> bool:
+    """GTX (post-only) LIMIT giris emri koy. Doldugunu poll_pending_entry saptar.
+    GTX = Good Till Crossing: aninda eslesecekse borsa REDDEDER -> kazara taker olmayiz."""
+    global _pending_entry
+
+    from execution.protection_orders import format_price, format_qty, round_qty_float
+
+    qty = await round_qty_float(plan.qty_total)
+    if qty < 0.001:
+        log.error(f"Maker giris: miktar borsa adimina gore sifir (plan={plan.qty_total})")
+        return False
+    plan.qty_total = qty
+    if bool(getattr(cfg, "V3_FULL_RUNNER_NO_TP", True)):
+        plan.qty_tp1 = 0.0
+        plan.qty_tp2 = 0.0
+
+    off = float(getattr(cfg, "V3_D_MAKER_OFFSET_BPS", 5.0) or 5.0)
+    ref = float(state.mark_price or state.price or plan.entry or 0)
+    if ref <= 0:
+        log.error("Maker giris: referans fiyat yok")
+        return False
+    # LONG -> mark'in ALTINA al-limiti / SHORT -> USTUNE sat-limiti (ikisi de caprazlamaz)
+    lim = ref * (1 - off / 1e4) if plan.direction == "LONG" else ref * (1 + off / 1e4)
+    side = "BUY" if plan.direction == "LONG" else "SELL"
+
+    r = await _req("POST", "/fapi/v1/order", {
+        "symbol": cfg.SYMBOL,
+        "side": side,
+        "type": "LIMIT",
+        "timeInForce": "GTX",            # post-only: maker GARANTI
+        "quantity": await format_qty(qty),
+        "price": await format_price(lim),
+        "positionSide": "BOTH",
+    })
+    if not isinstance(r, dict) or not r.get("orderId"):
+        log.error(f"Maker giris emri basarisiz: {r}")
+        return False
+    st = str(r.get("status", ""))
+    if st in ("REJECTED", "EXPIRED"):
+        # GTX caprazlardi (fiyat bize gelmis) -> islemi atla, kovalama yok
+        log.info(f"[MAKER] GTX reddedildi (caprazlardi) — islem atlandi ({st})")
+        return False
+
+    _pending_entry = {
+        "order_id": str(r.get("orderId")),
+        "plan": plan,
+        "signal_id": signal_id,
+        "limit": lim,
+        "placed_ts": time.time(),
+    }
+    log.info(f"[MAKER] LIMIT kondu {plan.direction} {qty:.4f} @ {lim:.2f} "
+             f"(ref={ref:.2f}, -{off:.0f}bps, GTX post-only) — dolum bekleniyor")
+    return True
+
+
+async def poll_pending_entry() -> None:
+    """Bekleyen maker giris emrini yokla: doldu -> pozisyonu kur; sure doldu -> iptal + atla."""
+    global _pending_entry
+
+    if _pending_entry is None or is_paper_mode():
+        return
+    pe = _pending_entry
+    try:
+        r = await _req("GET", "/fapi/v1/order",
+                       {"symbol": cfg.SYMBOL, "orderId": pe["order_id"]})
+    except Exception as ex:
+        log.debug(f"[MAKER] emir sorgu: {ex}")
+        return
+    if not isinstance(r, dict):
+        return
+    st = str(r.get("status", ""))
+    waited = time.time() - pe["placed_ts"]
+
+    if st == "FILLED":
+        fill = float(r.get("avgPrice") or 0) or pe["limit"]
+        _pending_entry = None
+        log.info(f"[MAKER] DOLDU @ {fill:.2f} ({waited/60:.1f}dk bekledi) — pozisyon kuruluyor")
+        try:
+            from botlog.db import log_maker_fill_event
+            log_maker_fill_event(pe["plan"].direction, pe["limit"], fill, waited, True)
+        except Exception:
+            pass
+        await _finalize_entry(pe["plan"], pe["signal_id"], fill, pe["order_id"])
+        return
+
+    if st in ("CANCELED", "REJECTED", "EXPIRED"):
+        log.info(f"[MAKER] emir {st} — islem atlandi")
+        _pending_entry = None
+        return
+
+    # PARTIALLY_FILLED: bizim boyutta pratikte olmaz; olursa dolani al, kalani iptal et
+    if st == "PARTIALLY_FILLED":
+        exq = float(r.get("executedQty") or 0)
+        max_wait = float(getattr(cfg, "V3_D_MAKER_FILL_BARS", 3) or 3) * 900
+        if waited >= max_wait and exq >= 0.001:
+            await _cancel_pending_order(pe["order_id"])
+            fill = float(r.get("avgPrice") or 0) or pe["limit"]
+            pe["plan"].qty_total = round(exq, 4)
+            _pending_entry = None
+            log.warning(f"[MAKER] kismi dolum {exq:.4f} — kalan iptal, dolanla devam")
+            await _finalize_entry(pe["plan"], pe["signal_id"], fill, pe["order_id"])
+        return
+
+    # NEW: sure doldu mu?
+    max_wait = float(getattr(cfg, "V3_D_MAKER_FILL_BARS", 3) or 3) * 900
+    if waited >= max_wait:
+        await _cancel_pending_order(pe["order_id"])
+        _pending_entry = None
+        log.info(f"[MAKER] KACTI — {max_wait/60:.0f}dk'da dolmadi, islem atlandi (kovalama yok)")
+        try:
+            from botlog.db import log_maker_fill_event
+            log_maker_fill_event(pe["plan"].direction, pe["limit"], 0.0, waited, False)
+        except Exception:
+            pass
+
+
+async def _cancel_pending_order(order_id: str) -> None:
+    try:
+        await _req("DELETE", "/fapi/v1/order", {"symbol": cfg.SYMBOL, "orderId": order_id})
+    except Exception as ex:
+        log.warning(f"[MAKER] iptal: {ex}")
+
+
+async def cancel_pending_entry_on_startup() -> None:
+    """RESTART GUVENLIGI: bekleyen giris limiti borsada kalirsa sonradan dolup
+    BOTUN HABERI OLMAYAN, SL'SIZ pozisyon yaratir. Startup'ta kosulsuz temizle."""
+    global _pending_entry
+
+    _pending_entry = None
+    if is_paper_mode() or not cfg.API_KEY:
+        return
+    try:
+        r = await _req("GET", "/fapi/v1/openOrders", {"symbol": cfg.SYMBOL})
+        if not isinstance(r, list):
+            return
+        n = 0
+        for o in r:
+            if str(o.get("type")) == "LIMIT" and not o.get("reduceOnly"):
+                await _cancel_pending_order(str(o.get("orderId")))
+                n += 1
+        if n:
+            log.warning(f"[MAKER] startup: {n} bekleyen giris limiti iptal edildi (orphan onlendi)")
+    except Exception as ex:
+        log.warning(f"[MAKER] startup temizlik: {ex}")
 
 
 async def get_position_qty() -> float:

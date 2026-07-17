@@ -289,6 +289,13 @@ async def _account_sync_loop():
                 await refresh_account_snapshot()
             except Exception as e:
                 log.debug(f"Account sync: {e}")
+            # MAKER giris: bekleyen limit doldu mu / suresi doldu mu (5sn'de bir yoklanir;
+            # dolum ile SL'in konmasi arasindaki korumasiz pencere bu kadar kisa tutulur)
+            try:
+                from execution.executor import poll_pending_entry
+                await poll_pending_entry()
+            except Exception as e:
+                log.debug(f"Maker poll: {e}")
         try:
             await asyncio.wait_for(wait_stop(), timeout=5.0)
             break
@@ -385,6 +392,14 @@ async def _main_loop():
 
     if cfg.API_KEY and not is_paper_mode():
         from execution.account_sync import reconcile_startup_exchange
+
+        # RESTART GUVENLIGI (maker): borsada kalmis bekleyen giris limiti sonradan dolup
+        # botun bilmedigi, SL'siz pozisyon yaratabilir -> reconcile'dan ONCE kosulsuz iptal.
+        try:
+            from execution.executor import cancel_pending_entry_on_startup
+            await cancel_pending_entry_on_startup()
+        except Exception as e:
+            log.warning(f"Maker startup temizlik: {e}")
 
         try:
             await reconcile_startup_exchange()

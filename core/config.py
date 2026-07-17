@@ -643,6 +643,16 @@ class Config:
     # scripts/_d_min_profit.py (18000 bar WF): cur>=12 HEM TRAIN (-6.0 vs -7.2) HEM OOS
     # (+12.7 vs +11.1) baseline'i gecer; >=20 OOS'ta bozulur -> 12 secildi.
     V3_POC_REVERT_MIN_PROFIT_BPS = float(os.getenv("V3_POC_REVERT_MIN_PROFIT_BPS", "12.0"))
+    # MAKER-LIMIT GIRIS (D) — KONTROLLU CANLI DENEY.
+    # Gerekce: D brut edge ~+6..16bps, taker round-trip ~10bps onu yiyor. GTX post-only
+    # limit = fee tasarrufu + OFFSET kadar iyi fiyat. scripts/_d_maker_vs_market.py
+    # (18000 bar WF, ters-secilim DAHIL): gercekci dolumda TRAIN +730 / OOS +726 bps.
+    # Emir ~0.027 ETH = seviye derinliginin %0.0014 -> kismi dolum pratikte yok.
+    # KARAR KURALI (onceden yazildi): ~20-30 sinyal sonra gercek fill >= %90 -> kalici;
+    # < %85 -> GERI AL (o bolgede TRAIN negatife doner). Dolmazsa kovalama YOK, islem atlanir.
+    V3_D_MAKER_ENTRY = os.getenv("V3_D_MAKER_ENTRY", "true").lower() in ("1", "true", "yes")
+    V3_D_MAKER_OFFSET_BPS = float(os.getenv("V3_D_MAKER_OFFSET_BPS", "5.0"))
+    V3_D_MAKER_FILL_BARS = int(os.getenv("V3_D_MAKER_FILL_BARS", "3"))  # 3x15m = 45dk
     # B GIRIS-TUTARLILIK: kompozit sinyalde fiyat-z de yonu teyit etsin (|px_z|>=coh).
     # Fiyat ortalamasinda iken acilan -> aninda mean-revert cikisi (0-1dk churn) engellenir.
     # Backtest: net +1293->+1330, 4/4 ceyrek, OOS pozitif. 0=kapali.

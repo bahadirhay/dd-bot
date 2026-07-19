@@ -653,6 +653,10 @@ class Config:
     V3_D_MAKER_ENTRY = os.getenv("V3_D_MAKER_ENTRY", "true").lower() in ("1", "true", "yes")
     V3_D_MAKER_OFFSET_BPS = float(os.getenv("V3_D_MAKER_OFFSET_BPS", "5.0"))
     V3_D_MAKER_FILL_BARS = int(os.getenv("V3_D_MAKER_FILL_BARS", "3"))  # 3x15m = 45dk
+    # OBI (order book imbalance) mikro-yapi SHADOW: her D sinyalinde canli emir-defteri
+    # dengesizligini kaydet + islem sonucuyla eslestir. Klines-CVD (fiyat-turevi golge) tutmadi;
+    # GERCEK OBI tarihsel test edilemez -> canli olcum tek yol. Fiyat-turevi-OLMAYAN, denenmemis aci.
+    V3_OBI_PAPER = os.getenv("V3_OBI_PAPER", "true").lower() in ("1", "true", "yes")
     # B GIRIS-TUTARLILIK: kompozit sinyalde fiyat-z de yonu teyit etsin (|px_z|>=coh).
     # Fiyat ortalamasinda iken acilan -> aninda mean-revert cikisi (0-1dk churn) engellenir.
     # Backtest: net +1293->+1330, 4/4 ceyrek, OOS pozitif. 0=kapali.

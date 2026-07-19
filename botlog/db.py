@@ -81,6 +81,56 @@ def log_maker_fill_event(direction: str, limit_px: float, fill_px: float,
         pass
 
 
+def _migrate_obi_paper(db: sqlite3.Connection) -> None:
+    """D + OBI (order book imbalance) mikro-yapi shadow. Her D sinyalinde canli OBI + islem sonucu.
+    Analiz: OBI D-yonune KARSI (aligned=0) islemler HIZALI (aligned=1) olanlardan daha mi kotu?"""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS obi_paper (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            open_ts REAL NOT NULL, open_human TEXT, side TEXT, entry REAL,
+            obi REAL, bid_qty REAL, ask_qty REAL, aligned INTEGER,
+            close_ts REAL, exit REAL, pnl_bps REAL, reason TEXT, status TEXT DEFAULT 'OPEN'
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_obi_ts ON obi_paper(open_ts DESC)")
+
+
+def log_obi_open(side: str, entry: float, obi: float, bid_qty: float,
+                 ask_qty: float, aligned: int) -> int:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            cur = db.execute(
+                "INSERT INTO obi_paper (open_ts,open_human,side,entry,obi,bid_qty,ask_qty,aligned,status)"
+                " VALUES (?,?,?,?,?,?,?,?, 'OPEN')",
+                (datetime.now().timestamp(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                 str(side), float(entry or 0), float(obi or 0), float(bid_qty or 0),
+                 float(ask_qty or 0), int(aligned)))
+            return int(cur.lastrowid or 0)
+    except Exception:
+        return 0
+
+
+def log_obi_close(rid: int, exit_px: float, pnl_bps: float, reason: str) -> None:
+    try:
+        with _conn() as db:
+            db.execute(
+                "UPDATE obi_paper SET close_ts=?, exit=?, pnl_bps=?, reason=?, status='CLOSED' WHERE id=?",
+                (time.time(), float(exit_px or 0), float(pnl_bps or 0), str(reason), int(rid)))
+    except Exception:
+        pass
+
+
+def get_open_obi() -> dict | None:
+    try:
+        with _conn() as db:
+            row = db.execute(
+                "SELECT * FROM obi_paper WHERE status='OPEN' ORDER BY id DESC LIMIT 1").fetchone()
+            return dict(row) if row else None
+    except Exception:
+        return None
+
+
 def _migrate_box_log(db: sqlite3.Connection) -> None:
     """Adaptif kutu kararlarini kaydeden tablo (her adim izlenebilsin)."""
     db.execute("""
@@ -1014,6 +1064,7 @@ def init():
         _migrate_trades_learning_columns(db)
         _migrate_box_log(db)
         _migrate_maker_fill(db)
+        _migrate_obi_paper(db)
         _migrate_b_paper(db)
         _migrate_chlong_paper(db)
         _migrate_statband_paper(db)

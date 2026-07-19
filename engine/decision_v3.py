@@ -401,6 +401,14 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
         maker_tick()
     except Exception:
         pass
+    # OBI mikro-yapi shadow: her D sinyalinde canli order-book imbalance + islem sonucu.
+    # Soru: OBI D-yonune karsiysa islem daha mi kotu (fiyat-turevi-olmayan filtre degerli mi)?
+    try:
+        from engine.obi_paper import paper_tick as obi_tick
+
+        obi_tick()
+    except Exception:
+        pass
     # EXTREME-FLOW SHORT paper (shadow): 15m forming delta_sum <= ~-3500 -> maker-limit SHORT.
     # Ilk OOS-pozitif order-flow yaklasimi (extreme-flow gozlemi + maker-execution birlesti).
     # YALNIZ SHORT (long robust degildi), 15m (5m OOS-cokuyordu). Canli fill + net dogrulama.

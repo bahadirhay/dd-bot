@@ -126,7 +126,12 @@ async def restore_live_position_from_exchange(
         if lv.get("sl", 0) > 0:
             state.pos_sl = lv["sl"]
             state.pos_sl_initial = lv["sl"]
-        if lv.get("tp1", 0) > 0:
+        from botlog.db import parse_tp1_original_from_notes
+
+        tp1o = parse_tp1_original_from_notes(str(lv.get("notes") or ""))
+        if tp1o > 0:
+            state.pos_tp1 = tp1o
+        elif lv.get("tp1", 0) > 0:
             state.pos_tp1 = lv["tp1"]
         if lv.get("tp2", 0) > 0:
             state.pos_tp2 = lv["tp2"]
@@ -188,6 +193,38 @@ async def restore_live_position_from_exchange(
         )
         th = state.position_breakout["thesis"]
         if th:
+            inv = float(th.get("invalidation_price") or 0)
+            tp1_done = bool(state.pos_tp1_hit or (lv or {}).get("tp1_hit") or (lv or {}).get("be_activated"))
+            bad_sl = False
+            cur_sl = float(state.pos_sl or 0)
+            cur_sl_valid = (
+                (side == "LONG" and 0 < cur_sl < entry)
+                or (side == "SHORT" and cur_sl > entry)
+            )
+            if cur_sl_valid:
+                # Restart'ta borsadaki/DB'deki geceri SL'i koru; yeniden kurulan
+                # basit tez eski destek/direnc cizgisiyle lokal raf SL'ini ezmesin.
+                th["invalidation_price"] = round(cur_sl, 2)
+                inv = cur_sl
+            if not tp1_done and inv > 0:
+                if side == "LONG" and inv < entry:
+                    bad_sl = cur_sl <= 0 or cur_sl >= entry
+                elif side == "SHORT" and inv > entry:
+                    bad_sl = cur_sl <= entry
+            if bad_sl:
+                old_sl = float(state.pos_sl or 0)
+                state.pos_sl = inv
+                state.pos_sl_initial = inv
+                try:
+                    from botlog.db import update_open_trade_sl
+
+                    update_open_trade_sl(ex._trade_id, inv)
+                except Exception:
+                    pass
+                log.warning(
+                    f"Restore SL onarildi: {side} eski={old_sl:.2f} "
+                    f"-> thesis invalidation={inv:.2f} (trade_id={ex._trade_id})"
+                )
             log.info(
                 f"Tez restore: {th.get('scenario')} key={th.get('key_level'):.2f} "
                 f"invalidation={th.get('invalidation_price'):.2f}"
@@ -331,11 +368,14 @@ async def refresh_account_snapshot(*, force: bool = False) -> bool:
             if abs(amt) >= 0.0001:
                 _flat_streak = 0
                 if not state.in_position:
-                    from execution.executor import is_position_opening
+                    from execution.executor import is_position_opening, has_pending_entry
 
-                    if is_position_opening():
+                    if is_position_opening() or has_pending_entry():
+                        # MAKER limiti doldu ama poll_pending_entry henuz finalize etmedi ->
+                        # adopt ETME, yoksa phantom kayit acilir (#324/#327 superseded_by_new_open).
+                        # poll_pending_entry bir sonraki turda pozisyonu dogru kaydeder.
                         log.debug(
-                            "Borsada pozisyon var ama açılış sürüyor — restore bekletildi"
+                            "Borsada pozisyon var ama acilis/maker-dolum finalize bekliyor — restore bekletildi"
                         )
                     else:
                         log.warning(
@@ -368,8 +408,59 @@ async def refresh_account_snapshot(*, force: bool = False) -> bool:
                     sl_price = state.pos_sl
                 if tp1 <= 0:
                     tp1 = state.pos_tp1
+                elif not state.pos_tp1_hit:
+                    old_tp1 = float(state.pos_tp1 or 0)
+                    tp1o = 0.0
+                    try:
+                        import execution.executor as ex
+                        from botlog.db import (
+                            get_trade_levels,
+                            parse_tp1_original_from_notes,
+                        )
+
+                        lv = get_trade_levels(int(getattr(ex, "_trade_id", 0) or 0)) or {}
+                        tp1o = parse_tp1_original_from_notes(str(lv.get("notes") or ""))
+                    except Exception:
+                        pass
+                    if tp1o > 0:
+                        state.pos_tp1 = tp1o
+                        tp1 = tp1o
+                    elif old_tp1 <= 0 or abs(old_tp1 - tp1) >= 0.5:
+                        state.pos_tp1 = tp1
+                        pb = dict(state.position_breakout or {})
+                        if pb:
+                            pb["tp1"] = float(tp1)
+                            state.position_breakout = pb
+                        try:
+                            import execution.executor as ex
+                            from botlog.db import update_open_trade_tps
+
+                            update_open_trade_tps(
+                                int(getattr(ex, "_trade_id", 0) or 0),
+                                tp1=tp1,
+                            )
+                        except Exception:
+                            pass
                 if tp2 <= 0:
                     tp2 = state.pos_tp2
+                elif bool(getattr(cfg, "SEND_TP2_ORDER", False)):
+                    old_tp2 = float(state.pos_tp2 or 0)
+                    if old_tp2 <= 0 or abs(old_tp2 - tp2) >= 0.5:
+                        state.pos_tp2 = tp2
+                        pb = dict(state.position_breakout or {})
+                        if pb:
+                            pb["tp2"] = float(tp2)
+                            state.position_breakout = pb
+                        try:
+                            import execution.executor as ex
+                            from botlog.db import update_open_trade_tps
+
+                            update_open_trade_tps(
+                                int(getattr(ex, "_trade_id", 0) or 0),
+                                tp2=tp2,
+                            )
+                        except Exception:
+                            pass
 
                 state.in_position = True
                 state.pos_side = side
@@ -503,18 +594,41 @@ async def reconcile_startup_exchange() -> bool:
 
     from botlog.db import close_orphan_open_trades
 
-    row = await fetch_position_row()
+    try:
+        row = await fetch_position_row()
+    except Exception as e:
+        state.api_ok = False
+        state.api_error = str(e)[:120]
+        state.exchange_reconciled = False
+        log.error(
+            f"Startup reconcile atlandi — Binance API ulasilamiyor: {state.api_error}"
+        )
+        return False
     amt = _f(row, "positionAmt") if row else 0.0
 
     if row and abs(amt) >= 0.0001:
         await restore_live_position_from_exchange(row)
         await refresh_account_snapshot(force=True)
 
-        from execution.protection_orders import manage_position_sl, maybe_adjust_open_tp
+        from execution.protection_orders import (
+            manage_position_sl,
+            maybe_adjust_open_tp,
+            maybe_restore_entry_tp1,
+        )
 
         await manage_position_sl(force=True)
         try:
-            await maybe_adjust_open_tp()
+            await maybe_restore_entry_tp1(
+                force=True,
+                reason="Startup TP1 giris onarimi",
+            )
+        except Exception:
+            pass
+        try:
+            await maybe_adjust_open_tp(
+                force=True,
+                reason="Startup lokal TP1 uyarlama",
+            )
         except Exception:
             pass
 
@@ -524,7 +638,7 @@ async def reconcile_startup_exchange() -> bool:
             f"Startup reconcile: pozisyon yüklendi — {state.pos_side} "
             f"{state.pos_qty:.4f} ETH @ {state.pos_entry:.2f}  "
             f"(trade_id={ex._trade_id})  SL={state.pos_sl:.2f} "
-            f"TP1={state.pos_tp1:.2f}"
+            f"TP1={state.pos_tp1:.2f} (kanal TP1 backfill sonrasi guncellenir)"
         )
         state.exchange_reconciled = True
         return True

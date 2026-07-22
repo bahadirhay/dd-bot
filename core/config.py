@@ -657,6 +657,13 @@ class Config:
     # dengesizligini kaydet + islem sonucuyla eslestir. Klines-CVD (fiyat-turevi golge) tutmadi;
     # GERCEK OBI tarihsel test edilemez -> canli olcum tek yol. Fiyat-turevi-OLMAYAN, denenmemis aci.
     V3_OBI_PAPER = os.getenv("V3_OBI_PAPER", "true").lower() in ("1", "true", "yes")
+    # SMA-HIZASI FILTRESI (D iyilestirme): sadece ana-trend yonunde fade et. uptrend (px>SMA) ->
+    # sadece LONG-dip; downtrend (px<SMA) -> sadece SHORT-rip. Ana-trende karsi fade D'nin en buyuk
+    # kaybi (trend-devam). Backtest: 3-coin (ETH/BTC/SOL) NEGATIFTEN POZITIFE, SMA 100-150 PLATO-robust
+    # (tek-nokta degil), mekanizma saglam. SMA120 en dengeli (ETH en iyi + BTC 4/4). Config-kapili,
+    # geri alinabilir. compute_signal'de -> tum D-turevi (canli D + maker/OBI shadow) miras alir.
+    V3_D_SMA_ALIGN = os.getenv("V3_D_SMA_ALIGN", "true").lower() in ("1", "true", "yes")
+    V3_D_SMA_ALIGN_LEN = int(os.getenv("V3_D_SMA_ALIGN_LEN", "120"))
     # B GIRIS-TUTARLILIK: kompozit sinyalde fiyat-z de yonu teyit etsin (|px_z|>=coh).
     # Fiyat ortalamasinda iken acilan -> aninda mean-revert cikisi (0-1dk churn) engellenir.
     # Backtest: net +1293->+1330, 4/4 ceyrek, OOS pozitif. 0=kapali.
@@ -766,6 +773,28 @@ class Config:
     # OOS +386->+459, isabet %41->%47, islem 61->38 (whipsaw azalir). order-flow teyidi ISE YARADI.
     V3_TMOM_CVD_CONFIRM = os.getenv("V3_TMOM_CVD_CONFIRM", "true").lower() in ("1", "true", "yes")
     V3_TMOM_CVD_LOOKBACK = int(os.getenv("V3_TMOM_CVD_LOOKBACK", "6"))
+    # Trend Magic HA shadow paper — gercek emir YOK. Backtest May-Jul 2026: 30m +4068, 1h +2746 bps.
+    V3_TREND_MAGIC_PAPER = os.getenv("V3_TREND_MAGIC_PAPER", "true").lower() in ("1", "true", "yes")
+    V3_TREND_MAGIC_TF_SEC = int(os.getenv("V3_TREND_MAGIC_TF_SEC", "1800"))  # 1800=30m, 3600=1h
+    V3_TREND_MAGIC_FEE_BPS = float(os.getenv("V3_TREND_MAGIC_FEE_BPS", "12"))  # fee8+slip2*2
+    V3_TM_CCI_PERIOD = int(os.getenv("V3_TM_CCI_PERIOD", "14"))
+    V3_TM_ATR_PERIOD = int(os.getenv("V3_TM_ATR_PERIOD", "5"))
+    V3_TM_MA_PERIOD = int(os.getenv("V3_TM_MA_PERIOD", "10"))
+    V3_TM_CCI_THRESHOLD = float(os.getenv("V3_TM_CCI_THRESHOLD", "80"))
+    V3_TM_TREND_PERSIST = int(os.getenv("V3_TM_TREND_PERSIST", "2"))
+    V3_TM_PRICE_DIST = float(os.getenv("V3_TM_PRICE_DIST", "0.8"))
+    V3_TM_SWING_RANGE = int(os.getenv("V3_TM_SWING_RANGE", "12"))
+    V3_TM_VOLUME_INCREASE_PCT = float(os.getenv("V3_TM_VOLUME_INCREASE_PCT", "20"))
+    V3_TM_MARTINGALE_ENABLED = os.getenv("V3_TM_MARTINGALE_ENABLED", "true").lower() in ("1", "true", "yes")
+    V3_TM_BARCLOSE_SEC = float(os.getenv("V3_TM_BARCLOSE_SEC", "180"))
+    V3_TM_TP_FAR_BPS = float(os.getenv("V3_TM_TP_FAR_BPS", "400"))
+    # Trend Magic CANLI otorite (30m/1h flip). Acikken D/B/V3-A kapali tutun.
+    V3_STRATEGY_TM_ENABLED = os.getenv("V3_STRATEGY_TM_ENABLED", "false").lower() in ("1", "true", "yes")
+    V3_TM_ALLOWED_TF_SEC = os.getenv("V3_TM_ALLOWED_TF_SEC", "1800")  # canli izin: 1800 veya 1800,3600
+    V3_TM_MIN_OOS_BPS = float(os.getenv("V3_TM_MIN_OOS_BPS", "0"))
+    V3_TM_MIN_TRADES = int(os.getenv("V3_TM_MIN_TRADES", "15"))
+    V3_TM_REQUIRE_EVAL = os.getenv("V3_TM_REQUIRE_EVAL", "true").lower() in ("1", "true", "yes")
+    V3_TM_SHADOW_ALL_TF = os.getenv("V3_TM_SHADOW_ALL_TF", "true").lower() in ("1", "true", "yes")
     # Strateji F: GUNLUK time-series-momentum trend-takip paper (shadow) — gercek emir YOK.
     # BUYUK bulgu: trend ETH'de GUNLUK barda calisir (OOS Sharpe ~1.1, +85%, N=30-90 plato).
     # D'ye tamamlayici 2. edge. long-short, gunluk kontrol, haftalarca tutus, -%60 DD goze al.

@@ -101,7 +101,8 @@ def compute_signal() -> dict:
     if px <= 0:
         return out
     M = int(getattr(cfg, "V3_POC_M", 40) or 40)
-    rows = _bars(M + 110)
+    sma_len = int(getattr(cfg, "V3_D_SMA_ALIGN_LEN", 120) or 120)
+    rows = _bars(max(M + 110, sma_len + 10))
     if len(rows) < M + 1:
         return out
     poc = _poc(rows[-M:])
@@ -129,6 +130,15 @@ def compute_signal() -> dict:
     if sig and mac > 0 and mc != 0:
         if (sig == "SHORT" and mc > mac) or (sig == "LONG" and mc < -mac):
             blocked = "macro_block"; sig = None
+    # SMA-HIZASI: sadece ana-trend yonunde fade. uptrend(px>SMA)->LONG-dip; downtrend->SHORT-rip.
+    # Ana-trende KARSI fade (D'nin en buyuk kaybi = trend-devam) bloklanir. Backtest 3-coin
+    # negatiften pozitife, SMA100-150 plato-robust. [[d-sma-align-jul2026]]
+    if sig and bool(getattr(cfg, "V3_D_SMA_ALIGN", False)):
+        cl = [r[0] for r in rows]
+        if len(cl) >= sma_len:
+            sma_v = sum(cl[-sma_len:]) / sma_len
+            if (sig == "LONG" and px <= sma_v) or (sig == "SHORT" and px >= sma_v):
+                blocked = "sma_align"; sig = None
     out.update({"ready": True, "dev": round(dev, 1), "poc": round(poc, 2), "px": px,
                 "signal": sig, "macro_slope": round(mc, 0), "blocked": blocked})
     return out

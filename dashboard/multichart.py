@@ -13,7 +13,7 @@ SHADOW_DB = os.path.join(os.path.dirname(__file__), "..", "data", "d_multicoin_s
 M, DEV, SMA_LEN, ER_WIN, ER_GATE = 40, 85.0, 120, 20, 0.5
 BG, UP, DN, POC_C, SMA_C, TXT = "#0d1117", "#26a69a", "#ef5350", "#f0b90b", "#5c9ded", "#c9d1d9"
 
-def fetch(sym, limit=240):
+def fetch(sym, limit=140):
     u = "https://fapi.binance.com/fapi/v1/klines?symbol=%s&interval=15m&limit=%d" % (sym, limit)
     try:
         r = json.loads(urllib.request.urlopen(u, timeout=12).read())
@@ -95,7 +95,7 @@ app = dash.Dash(__name__)
 app.title = "D Cok-Coin Grid"
 app.layout = html.Div([
     dcc.Store(id="focus", data=COINS[0]),
-    dcc.Interval(id="tick", interval=15000, n_intervals=0),
+    dcc.Interval(id="tick", interval=3000, n_intervals=0),
     html.Div([html.H3("D Cok-Coin Panel", style={"display": "inline", "marginRight": "16px"}),
               html.Span("buyut:"), *[html.Button(s.replace("USDT", ""), id="btn-%s" % s,
                   n_clicks=0, style={"margin": "0 4px", "background": "#21262d", "color": TXT,

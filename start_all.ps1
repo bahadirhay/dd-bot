@@ -42,14 +42,24 @@ if ((Test-PyRunning "main.py") -or (Test-SupRunning)) {
     Start-Sleep -Seconds 20
 }
 
-# 2) Multichart grid paneli (8055) - ayri surec.
-if (Test-PyRunning "multichart.py") {
-    Write-Host "[2] Grid panel (8055) ZATEN calisiyor -> atlandi"
-} else {
-    Write-Host "[2] Grid panel (8055) baslatiliyor..."
-    Start-Process $py -ArgumentList "dashboard\multichart.py" -WindowStyle Minimized `
-        -RedirectStandardOutput "data\logs\multichart.log" -RedirectStandardError "data\logs\multichart.err"
-    Start-Sleep -Seconds 4
+# 2) Ayri panel surecleri (bot disinda, hepsi read-only/ayri port). Liste -> yeni panel ekle.
+$panels = @(
+    @{ name="Grid cok-coin"; script="dashboard\multichart.py";          port=8055; log="multichart" },
+    @{ name="DumpFade";      script="dashboard\dumpfade_live_panel.py";  port=8056; log="dumpfade_panel" },
+    @{ name="Strateji F";    script="dashboard\ftsm_live_panel.py";      port=8057; log="ftsm_panel" },
+    @{ name="Rejim izleme";  script="dashboard\regime_panel.py";         port=8058; log="regime_panel" }
+)
+foreach ($pn in $panels) {
+    $base = Split-Path $pn.script -Leaf
+    if (Test-PyRunning $base) {
+        Write-Host ("[2] {0} ({1}) ZATEN calisiyor -> atlandi" -f $pn.name, $pn.port)
+    } else {
+        Write-Host ("[2] {0} ({1}) baslatiliyor..." -f $pn.name, $pn.port)
+        Start-Process $py -ArgumentList $pn.script -WindowStyle Minimized `
+            -RedirectStandardOutput ("data\logs\{0}.log" -f $pn.log) `
+            -RedirectStandardError ("data\logs\{0}.err" -f $pn.log)
+        Start-Sleep -Seconds 3
+    }
 }
 
 # 3) SOL/LINK cok-coin shadow - kacirlan barlari yakala (deterministik, idempotent).
@@ -60,9 +70,12 @@ Write-Host "[3] Cok-coin shadow guncelleniyor (kacirlan barlar yakalaniyor)..."
 Start-Sleep -Seconds 2
 Write-Host ""
 Write-Host "=== DURUM ==="
-if (Test-PyRunning "main.py") { Write-Host "  Bot         : CALISIYOR" } else { Write-Host "  Bot         : YOK (!) - run_bot.ps1 loguna bak" }
-if (Test-Port 8050) { Write-Host "  Ana panel   : http://localhost:8050  UP" } else { Write-Host "  Ana panel   : henuz DOWN (bot aciliyorsa 10-20sn daha bekle)" }
-if (Test-Port 8055) { Write-Host "  Grid panel  : http://localhost:8055  UP" } else { Write-Host "  Grid panel  : DOWN (!) - data\logs\multichart.err bak" }
+if (Test-PyRunning "main.py") { Write-Host "  Bot           : CALISIYOR" } else { Write-Host "  Bot           : YOK (!) - run_bot.ps1 loguna bak" }
+if (Test-Port 8050) { Write-Host "  Ana panel     : http://localhost:8050  UP" } else { Write-Host "  Ana panel     : henuz DOWN (bot aciliyorsa 10-20sn daha bekle)" }
+foreach ($pn in $panels) {
+    if (Test-Port $pn.port) { Write-Host ("  {0,-13} : http://localhost:{1}  UP" -f $pn.name, $pn.port) }
+    else { Write-Host ("  {0,-13} : DOWN (!) - data\logs\{1}.err bak" -f $pn.name, $pn.log) }
+}
 Write-Host ""
 Write-Host "Kacirlan ~1sa veri: bot acilista kline backfill + borsa pozisyon/PnL reconcile yapti."
 Write-Host "Shadow (SOL/LINK) kacirlan barlarla guncellendi. Panelleri tarayicida ac."

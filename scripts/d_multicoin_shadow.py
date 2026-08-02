@@ -9,7 +9,9 @@ o ancak kucuk-canli asamasinda olculur. SOL/LINK likit oldugu icin fill riski IN
 """
 import sqlite3, os, urllib.request, json, time, datetime as dt
 
-COINS = ["SOLUSDT", "LINKUSDT", "ETHUSDT"]
+# Robust (4-ceyrek backtest): ETH/BTC/SOL/LINK. BNB ZAYIF (1/4) - sadece izleme.
+# NOT: hicbiri canli-kanitli degil; forward olcum icin. Backtest-robust != canli-pozitif.
+COINS = ["ETHUSDT", "BTCUSDT", "SOLUSDT", "LINKUSDT", "BNBUSDT"]
 DB = os.path.join(os.path.dirname(__file__), "..", "data", "d_multicoin_shadow.db")
 # FORWARD baslangici: bu tarihten sonrasi "gercek forward" (oncesi baglam/backtest)
 FORWARD_TS = dt.datetime(2026, 7, 24, 0, 0).timestamp()
@@ -85,7 +87,7 @@ def ensure_db():
 
 if __name__=="__main__":
     c=ensure_db()
-    print("=== D cok-coin forward-shadow (SOL/LINK/ETH) | %s ==="%dt.datetime.now().strftime("%Y-%m-%d %H:%M"))
+    print("=== D cok-coin forward-shadow (%s) | %s ==="%("/".join(s.replace("USDT","") for s in COINS), dt.datetime.now().strftime("%Y-%m-%d %H:%M")))
     print("forward baslangic: %s | DB: data/d_multicoin_shadow.db\n"%dt.datetime.fromtimestamp(FORWARD_TS).strftime("%Y-%m-%d"))
     for sym in COINS:
         bars=kl(sym,45)

@@ -36,8 +36,8 @@ Write-Host "=== ELEKTRIK/REBOOT SONRASI BASLATMA ==="
 if ((Test-PyRunning "main.py") -or (Test-SupRunning)) {
     Write-Host "[1] Bot ZATEN calisiyor -> atlandi (cift bot riskli)"
 } else {
-    Write-Host "[1] Bot baslatiliyor (supervisor run_bot.ps1)..."
-    Start-Process powershell -ArgumentList "-ExecutionPolicy","Bypass","-File",".\run_bot.ps1" -WindowStyle Minimized
+    Write-Host "[1] Bot baslatiliyor (supervisor run_bot.ps1) - GORUNUR pencere (akisi izle)..."
+    Start-Process powershell -ArgumentList "-ExecutionPolicy","Bypass","-File",".\run_bot.ps1" -WindowStyle Normal
     Write-Host "    backfill + reconcile + 8050 panel icin ~20sn bekleniyor..."
     Start-Sleep -Seconds 20
 }

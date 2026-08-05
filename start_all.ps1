@@ -66,9 +66,10 @@ foreach ($pn in $panels) {
 Write-Host "[3] DB budama (7 gunden eski snapshot/event)..."
 & $py scripts\prune_db.py 7
 
-# 4) SOL/LINK cok-coin shadow - kacirlan barlari yakala (deterministik, idempotent).
-Write-Host "[4] Cok-coin shadow guncelleniyor (kacirlan barlar yakalaniyor)..."
+# 4) Forward-shadow'lar - deterministik, idempotent (D cok-coin + funding-kontraryan).
+Write-Host "[4] Forward-shadow'lar guncelleniyor (D cok-coin + funding)..."
 & $py scripts\d_multicoin_shadow.py
+& $py scripts\funding_shadow.py
 
 # 4) DURUM OZETI
 Start-Sleep -Seconds 2

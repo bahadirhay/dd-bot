@@ -62,8 +62,12 @@ foreach ($pn in $panels) {
     }
 }
 
-# 3) SOL/LINK cok-coin shadow - kacirlan barlari yakala (deterministik, idempotent).
-Write-Host "[3] Cok-coin shadow guncelleniyor (kacirlan barlar yakalaniyor)..."
+# 3) DB retention - eski snapshot/event budama (13GB sismesin, her aciliste).
+Write-Host "[3] DB budama (7 gunden eski snapshot/event)..."
+& $py scripts\prune_db.py 7
+
+# 4) SOL/LINK cok-coin shadow - kacirlan barlari yakala (deterministik, idempotent).
+Write-Host "[4] Cok-coin shadow guncelleniyor (kacirlan barlar yakalaniyor)..."
 & $py scripts\d_multicoin_shadow.py
 
 # 4) DURUM OZETI

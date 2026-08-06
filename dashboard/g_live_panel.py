@@ -77,24 +77,34 @@ def _signed_get(path, params=None, timeout=8):
 
 
 def balance():
-    """Gercek hesap bakiyesi + acik pozisyonlarin unrealized PnL'i (anlik hareket eden)."""
+    """GERCEK hesap bakiyesi. wallet = 'balance' alani (isolated-margin dahil TOPLAM cuzdan);
+    crossWalletBalance DEGIL (o, acik isolated pozisyonun teminatini disar birakip yaniltir).
+    unpnl = TUM acik pozisyonlarin (cross+isolated) unrealized toplami (positionRisk'ten)."""
     b = _signed_get("/fapi/v2/balance")
     if not isinstance(b, list):
         return None
+    wallet = avail = None
     for a in b:
         if a.get("asset") == "USDT":
-            wallet = float(a.get("crossWalletBalance", a.get("balance", 0)) or 0)
-            unpnl = float(a.get("crossUnPnl", 0) or 0)
+            wallet = float(a.get("balance", 0) or 0)
             avail = float(a.get("availableBalance", 0) or 0)
-            return {"wallet": wallet, "unpnl": unpnl, "equity": wallet + unpnl, "avail": avail}
-    return None
+    if wallet is None:
+        return None
+    unpnl = 0.0
+    pr = _signed_get("/fapi/v2/positionRisk")
+    if isinstance(pr, list):
+        for p in pr:
+            if abs(float(p.get("positionAmt", 0) or 0)) > 0:
+                unpnl += float(p.get("unRealizedProfit", 0) or 0)
+    return {"wallet": wallet, "unpnl": unpnl, "equity": wallet + unpnl, "avail": avail}
 
 
 def klines(sym, interval="15m", limit=192):
     try:
         r = json.loads(urllib.request.urlopen(
             f"{cfg.REST}/fapi/v1/klines?symbol={sym}&interval={interval}&limit={limit}", timeout=8).read())
-        return [(int(x[0]) / 1000, float(x[4])) for x in r]   # (ts_sec, close)
+        # (ts_ms, open, high, low, close)
+        return [(int(x[0]), float(x[1]), float(x[2]), float(x[3]), float(x[4])) for x in r]
     except Exception:
         return []
 
@@ -105,39 +115,64 @@ def trades_for(sym):
     return q("SELECT * FROM g_live WHERE symbol=? ORDER BY open_ts", (sym,))
 
 
+def _hline(fig, y, color, dash, label, width=1.4):
+    fig.add_hline(y=y, line_dash=dash, line_color=color, line_width=width,
+                  annotation_text=label, annotation_position="right",
+                  annotation_font_color=color, annotation_font_size=11)
+
+
 def price_chart(sym):
-    """Coin fiyat cizgisi + G'nin giris/cikis isaretleri (pozisyon nerede acildi/kapandi)."""
+    """D dashboard tarzi: mum grafik + acik pozisyon (giris/SL/24h-cikis cizgileri) + gecmis islem isaretleri."""
     kl = klines(sym)
     fig = go.Figure()
     if kl:
-        xs = [k[0] * 1000 for k in kl]; ys = [k[1] for k in kl]
-        fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", line=dict(color="#58a6ff", width=1.4),
-                                 name=sym.replace("USDT", ""), hovertemplate="%{y:.4g}<extra></extra>"))
+        fig.add_trace(go.Candlestick(
+            x=[k[0] for k in kl], open=[k[1] for k in kl], high=[k[2] for k in kl],
+            low=[k[3] for k in kl], close=[k[4] for k in kl],
+            increasing=dict(line=dict(color=UP), fillcolor=UP),
+            decreasing=dict(line=dict(color=DN), fillcolor=DN), name=sym.replace("USDT", ""),
+            showlegend=False))
+    last_px = kl[-1][4] if kl else 0
+
     for t in trades_for(sym):
         is_long = t["side"] == "LONG"
         e_col = UP if is_long else DN
-        sym_marker = "triangle-up" if is_long else "triangle-down"
+        ent = t["entry_px"] or 0
+        o_ms = t["open_ts"] * 1000
         # giris isareti
-        fig.add_trace(go.Scatter(x=[t["open_ts"] * 1000], y=[t["entry_px"]], mode="markers",
-                                 marker=dict(symbol=sym_marker, size=14, color=e_col,
-                                             line=dict(color="#fff", width=1)),
-                                 name=f"{t['side']} giris", showlegend=False,
+        fig.add_trace(go.Scatter(x=[o_ms], y=[ent], mode="markers",
+                                 marker=dict(symbol="triangle-up" if is_long else "triangle-down",
+                                             size=15, color=e_col, line=dict(color="#fff", width=1.2)),
+                                 showlegend=False,
                                  hovertemplate=f"{t['side']} giris %{{y:.4g}}<extra></extra>"))
-        # cikis isareti + baglanti
-        if t["status"] == "CLOSED" and t["close_ts"] and t["exit_px"]:
+        if t["status"] == "OPEN":
+            # ACIK POZISYON: giris + SL (-10%) + 24h zaman-cikisi cizgileri (D dashboard gibi)
+            sl = ent * (1 + STOP_PCT / 100) if is_long else ent * (1 - STOP_PCT / 100)
+            _hline(fig, ent, "#c9d1d9", "solid", f"GIRIS {ent:.4g}", 1.6)
+            _hline(fig, sl, DN, "dash", f"SL {sl:.4g} ({STOP_PCT:g}%)", 1.4)
+            # 24h cikis: dikey cizgi (fiyat-TP degil, zaman-TP)
+            exit_ms = (t["open_ts"] + HOLD_H * 3600) * 1000
+            fig.add_vline(x=exit_ms, line_dash="dot", line_color=ACC, line_width=1.4,
+                          annotation_text="24h cikis", annotation_position="top",
+                          annotation_font_color=ACC, annotation_font_size=11)
+            # canli PnL kutusu (giris->son fiyat)
+            if last_px:
+                pnl_pct = ((last_px - ent) if is_long else (ent - last_px)) / ent * 100
+                fig.add_trace(go.Scatter(x=[o_ms, kl[-1][0]], y=[ent, last_px], mode="lines",
+                                         line=dict(color=UP if pnl_pct >= 0 else DN, width=1, dash="dot"),
+                                         showlegend=False, hoverinfo="skip"))
+        elif t["close_ts"] and t["exit_px"]:
             x_col = UP if (t["pnl_bps"] or 0) >= 0 else DN
-            fig.add_trace(go.Scatter(x=[t["open_ts"] * 1000, t["close_ts"] * 1000],
-                                     y=[t["entry_px"], t["exit_px"]], mode="lines",
-                                     line=dict(color=x_col, width=1, dash="dot"), showlegend=False,
-                                     hoverinfo="skip"))
+            fig.add_trace(go.Scatter(x=[o_ms, t["close_ts"] * 1000], y=[ent, t["exit_px"]], mode="lines",
+                                     line=dict(color=x_col, width=1, dash="dot"), showlegend=False, hoverinfo="skip"))
             fig.add_trace(go.Scatter(x=[t["close_ts"] * 1000], y=[t["exit_px"]], mode="markers",
-                                     marker=dict(symbol="x", size=11, color=x_col),
-                                     showlegend=False,
+                                     marker=dict(symbol="x", size=12, color=x_col), showlegend=False,
                                      hovertemplate=f"cikis %{{y:.4g}} ({t['pnl_bps']:+.0f}bps)<extra></extra>"))
+
     fig.update_layout(
-        height=240, margin=dict(l=8, r=8, t=28, b=8), paper_bgcolor=CARD, plot_bgcolor=CARD,
+        height=340, margin=dict(l=8, r=64, t=28, b=8), paper_bgcolor=CARD, plot_bgcolor=CARD,
         title=dict(text=sym.replace("USDT", "") + " · 15m", x=0.01, font=dict(color=TXT, size=13)),
-        xaxis=dict(type="date", gridcolor="#21262d", color=DIM, showgrid=True),
+        xaxis=dict(type="date", gridcolor="#21262d", color=DIM, rangeslider=dict(visible=False)),
         yaxis=dict(gridcolor="#21262d", color=DIM, side="right"),
         showlegend=False, font=dict(color=TXT))
     return dcc.Graph(figure=fig, config={"displayModeBar": False},

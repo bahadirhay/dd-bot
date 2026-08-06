@@ -24,9 +24,10 @@ from core.logger import get_logger
 
 log = get_logger("G-Live")
 
-# D KAPATILDI (V3_STRATEGY_D_ENABLED=false, 2026-08-06 kullanici karari) -> ETH serbest, cakisma yok.
-# G artik ETH (dogrulanmis p=0.040) + AVAX (p=0.037), ikisi de permutasyon-gercek, likit.
-COINS = ["ETHUSDT", "AVAXUSDT"]
+# G coinleri — hepsi BAGIMSIZ dogrulandi (permutasyon + iki-yari tutarlilik, taze veri 2026-08-06):
+#   ETH p=0.027 (+37/isl), AVAX p=0.038 (+37), INJ p=0.002 (+126, iki-yari +6010/+7585, Bonferroni-gecer).
+# ETC/SUI iki-yari tutarsiz (tek-pencere) -> ALINMADI. Guard COIN-BASI (biri digerini etkilemez).
+COINS = ["ETHUSDT", "AVAXUSDT", "INJUSDT"]
 W = 120           # rolling funding penceresi (40 gun)
 PCT = 0.15        # uc yuzdelik
 HOLD_H = 24       # tutus (backtest ile ayni)
@@ -72,10 +73,15 @@ def _get_open_db():
     rows = c.execute("SELECT id,symbol,side,entry_px,qty,open_ts,funding FROM g_live WHERE status='OPEN'").fetchall()
     c.close(); return rows
 
-def _today_realized_usd() -> float:
+def _today_realized_usd(sym=None) -> float:
+    """Bugunku realized PnL. sym verilirse SADECE o coin (coin-basi guard icin)."""
     day0 = int(time.time() // 86400) * 86400
     c = _db()
-    r = c.execute("SELECT COALESCE(SUM(pnl_usd),0) FROM g_live WHERE status='CLOSED' AND close_ts>=?", (day0,)).fetchone()
+    if sym:
+        r = c.execute("SELECT COALESCE(SUM(pnl_usd),0) FROM g_live WHERE status='CLOSED' AND close_ts>=? AND symbol=?",
+                      (day0, sym)).fetchone()
+    else:
+        r = c.execute("SELECT COALESCE(SUM(pnl_usd),0) FROM g_live WHERE status='CLOSED' AND close_ts>=?", (day0,)).fetchone()
     c.close(); return float(r[0] or 0)
 
 
@@ -153,12 +159,15 @@ def _funding_signal(sym):
 
 
 # ───────── guard ─────────
-def _can_trade():
+def _can_trade(sym):
+    """COIN-BASI gunluk-zarar guard'i: her coin kendi bugunku realized zararina bakar.
+    Testlerde her coin BAGIMSIZ dogrulandi -> bir coinin kotu gunu digerlerini ETKILEMEZ."""
     eq = _equity()
     if eq <= 0: return True
-    pct = _today_realized_usd() / eq * 100.0
+    pct = _today_realized_usd(sym) / eq * 100.0
     if pct <= -MAX_DAILY_LOSS_PCT:
-        log.warning(f"[G-LIVE] KENDI gunluk-zarar limiti ({pct:.1f}%) — bugun yeni giris yok (D etkilenmedi)")
+        log.warning(f"[G-LIVE] {sym} gunluk-zarar limiti ({pct:.1f}%) — bugun SADECE {sym} yeni giris yok "
+                    f"(diger coinler ETKILENMEZ)")
         return False
     return True
 
@@ -237,12 +246,12 @@ def _tick():
             _exit(sym, rec, "sl")
         elif held_h >= HOLD_H:
             _exit(sym, rec, "24h")
-    # 2) yeni giris (funding uc + guard + pozisyon yoksa)
-    if not _can_trade():
-        return
+    # 2) yeni giris (funding uc + COIN-BASI guard + pozisyon yoksa)
     for sym in COINS:
         with _lock:
             if sym in _open: continue
+        if not _can_trade(sym):   # coin-basi: sadece bu coin bloklanir, digerleri devam
+            continue
         sig = _funding_signal(sym)
         if not sig: continue
         side, funding, ftime = sig
@@ -279,11 +288,11 @@ def live_tick() -> None:
     from core.config import cfg as _c
     if not bool(getattr(_c, "V3_G_LIVE", False)):
         return
-    try:
-        from core.config import is_paper_mode
-        if is_paper_mode(): return
-    except Exception:
-        pass
+    # G, ana botun PAPER_MODE'undan BAGIMSIZ: yalnizca acik V3_G_LIVE anahtariyla + API anahtari
+    # varsa canli. Boylece ana bot paper'a alinip (test-edilmemis V3 motoru susturulup) yalniz
+    # test-edilmis G canli tutulabilir. (Eskiden is_paper_mode() gate'liydi -> paper'da G de susardi.)
+    if not (getattr(_c, "API_KEY", "") and getattr(_c, "API_SECRET", "")):
+        return
     with _thread_lock:
         if _thread_started: return
         _thread_started = True

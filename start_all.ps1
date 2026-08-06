@@ -47,7 +47,8 @@ $panels = @(
     @{ name="Grid cok-coin"; script="dashboard\multichart.py";          port=8055; log="multichart" },
     @{ name="DumpFade";      script="dashboard\dumpfade_live_panel.py";  port=8056; log="dumpfade_panel" },
     @{ name="Strateji F";    script="dashboard\ftsm_live_panel.py";      port=8057; log="ftsm_panel" },
-    @{ name="Rejim izleme";  script="dashboard\regime_panel.py";         port=8058; log="regime_panel" }
+    @{ name="Rejim izleme";  script="dashboard\regime_panel.py";         port=8058; log="regime_panel" },
+    @{ name="Strateji G";    script="dashboard\funding_panel.py";        port=8059; log="funding_panel" }
 )
 foreach ($pn in $panels) {
     $base = Split-Path $pn.script -Leaf

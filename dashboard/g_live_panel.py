@@ -191,11 +191,19 @@ def signal_cards():
             txt, col = "LONG sinyal", UP
         else:
             txt, col = "bekle", DIM
+        try:
+            px = _mark(sym)
+        except Exception:
+            px = 0.0
         cards.append(html.Div([
-            html.Div(sym.replace("USDT", ""), style={"color": TXT, "fontSize": "13px", "fontWeight": "700"}),
-            html.Div(f"funding {rate*100:+.4f}%", style={"color": DIM, "fontSize": "12px", "marginTop": "2px"}),
+            html.Div([
+                html.Span(sym.replace("USDT", ""), style={"color": TXT, "fontSize": "13px", "fontWeight": "700"}),
+                html.Span(f"  ${px:.4g}" if px else "  -", style={"color": TXT, "fontSize": "18px",
+                          "fontWeight": "700", "marginLeft": "6px"}),
+            ]),
+            html.Div(f"funding {rate*100:+.4f}%", style={"color": DIM, "fontSize": "12px", "marginTop": "3px"}),
             html.Div(txt, style={"color": col, "fontSize": "15px", "fontWeight": "600", "marginTop": "4px"}),
-        ], style={"background": CARD, "padding": "12px 16px", "borderRadius": "8px", "minWidth": "150px"}))
+        ], style={"background": CARD, "padding": "12px 16px", "borderRadius": "8px", "minWidth": "170px"}))
     return cards
 
 

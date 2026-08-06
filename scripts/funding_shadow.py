@@ -5,9 +5,11 @@ Rolling yuzdelik esik (look-ahead YOK), 24h tutus. Kendi DB (data/funding_shadow
 canli bota SIFIR dokunus. Haftalik calistir. Deploy/forward: 2026-08-05."""
 import sqlite3, os, urllib.request, json, time, datetime as dt, bisect
 
-MAIN=["ETHUSDT","AVAXUSDT"]          # permutasyon p<0.05 (gercek)
-WATCH=["XRPUSDT","LINKUSDT"]         # sinirda (p~0.05)
-COINS=MAIN+WATCH
+MAIN=["ETHUSDT","AVAXUSDT"]              # likit + permutasyon p<0.05 (canli-oncelik)
+SCAN=["INJUSDT","ETCUSDT","SUIUSDT"]     # genis-tarama p<0.05 (INJ p=0.000, ETC 0.005, SUI 0.010)
+                                          # AMA az-likit -> forward-fill'de +130/+75 erir mi? OLC.
+WATCH=["XRPUSDT","LINKUSDT"]             # sinirda (p~0.05)
+COINS=MAIN+SCAN+WATCH
 DB=os.path.join(os.path.dirname(__file__),"..","data","funding_shadow.db")
 FEE=6.0; HOLD=24; W=120; PCT=0.15
 FORWARD_TS=dt.datetime(2026,8,5,0,0).timestamp()
@@ -71,6 +73,6 @@ if __name__=="__main__":
         fwd=[r[0] for r in allr if r[1]>=FORWARD_TS]; tot=[r[0] for r in allr]
         def s(v): return (len(v),sum(v),100*sum(1 for x in v if x>0)//len(v) if v else 0)
         nt,nett,wt=s(tot); nf,netf,wf=s(fwd)
-        tag="ANA" if sym in MAIN else "izle"
+        tag="ANA" if sym in MAIN else ("tarama" if sym in SCAN else "izle")
         print("  %-8s[%s] TUM: %d isl net%+.0f win%d%% | FORWARD(>=08-05): %d isl net%+.0f"%(sym.replace("USDT",""),tag,nt,nett,wt,nf,netf))
     print("\nHaftalik calistir -> FORWARD buyur. ETH/AVAX forward-pozitif kalirsa kucuk-canli adayi.")

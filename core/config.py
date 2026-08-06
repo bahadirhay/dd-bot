@@ -81,6 +81,16 @@ class Config:
     TP1_PCT = 0.50
     MIN_RR = 1.5
 
+    # DUMP-FADE cross-sectional GERCEK-EMIR (engine/dumpfade_live.py). VARSAYILAN KAPALI.
+    # Acildiginda TRADE_MARGIN_USD/LEVERAGE/MARGIN ile (ana bot ile AYNI degerler) daraltilmis
+    # likit-major evrende ($10 margin x5 kaldirac ~ $50 notional) gercek kucuk emir verir.
+    # bkz dumpfade-liquidity-jul2026 + maker-execution-jul2026 memory, scripts/_dumpfade_stop_wf.py.
+    V3_DUMPFADE_LIVE = os.getenv("V3_DUMPFADE_LIVE", "false").lower() in ("1", "true", "yes")
+    # DUMP-FADE paper/shadow (engine/dumpfade_paper.py). En agir tick (gunluk 100+ coin dump taramasi).
+    # Kanitlandi KAYBEDIYOR (-16426 tail'ler). decision_v3 bunu bu flag'e bagli cagirir. Varsayilan
+    # false (susturuldu) — .env ile acilabilir. bkz [[dumpfade-liquidity-jul2026]].
+    V3_DUMPFADE_PAPER = os.getenv("V3_DUMPFADE_PAPER", "false").lower() in ("1", "true", "yes")
+
     # mmbot3 yapı / SL-TP (structure_levels + structure_analyzer)
     FS_STRUCT_SL_BUFFER_BPS = 10.0
     FS_STRUCT_BREAK_BPS = 8.0

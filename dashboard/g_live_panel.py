@@ -115,6 +115,16 @@ def trades_for(sym):
     return q("SELECT * FROM g_live WHERE symbol=? ORDER BY open_ts", (sym,))
 
 
+def main_bot_open(sym):
+    """Ana botun (D/V3, cfg.SYMBOL) borsadaki acik pozisyonu — entry/SL/TP1/TP2/liq (trades tablosundan).
+    Tek-sembol bot: sadece cfg.SYMBOL grafiginde gecerli."""
+    if sym != getattr(cfg, "SYMBOL", "ETHUSDT"):
+        return None
+    rows = q("SELECT direction,entry_price,sl,tp1,tp2,liq_price,open_ts FROM trades "
+             "WHERE status='OPEN' ORDER BY id DESC LIMIT 1")
+    return rows[0] if rows else None
+
+
 def _hline(fig, y, color, dash, label, width=1.4):
     fig.add_hline(y=y, line_dash=dash, line_color=color, line_width=width,
                   annotation_text=label, annotation_position="right",
@@ -133,6 +143,22 @@ def price_chart(sym):
             decreasing=dict(line=dict(color=DN), fillcolor=DN), name=sym.replace("USDT", ""),
             showlegend=False))
     last_px = kl[-1][4] if kl else 0
+
+    # ANA BOT (D/V3) acik pozisyonu — 8050 gibi entry/SL/TP1/TP2/liq cizgileri
+    mb = main_bot_open(sym)
+    if mb and (mb.get("entry_price") or 0) > 0:
+        d = mb["direction"]; ent = float(mb["entry_price"])
+        _hline(fig, ent, "#c9d1d9", "solid", f"ANA BOT {d} {ent:.4g}", 1.8)
+        if mb.get("sl"):   _hline(fig, float(mb["sl"]), DN, "dash", f"SL {float(mb['sl']):.4g}", 1.5)
+        if mb.get("tp1"):  _hline(fig, float(mb["tp1"]), UP, "dashdot", f"TP1 {float(mb['tp1']):.4g}", 1.5)
+        if mb.get("tp2"):  _hline(fig, float(mb["tp2"]), UP, "dot", f"TP2 {float(mb['tp2']):.4g}", 1.2)
+        if mb.get("liq_price"): _hline(fig, float(mb["liq_price"]), "#6e2020", "dot", f"LIQ {float(mb['liq_price']):.4g}", 1)
+        if mb.get("open_ts"):
+            fig.add_trace(go.Scatter(x=[mb["open_ts"] * 1000], y=[ent], mode="markers",
+                                     marker=dict(symbol="triangle-up" if d == "LONG" else "triangle-down",
+                                                 size=15, color=UP if d == "LONG" else DN,
+                                                 line=dict(color="#fff", width=1.2)), showlegend=False,
+                                     hovertemplate=f"ANA BOT {d} %{{y:.4g}}<extra></extra>"))
 
     for t in trades_for(sym):
         is_long = t["side"] == "LONG"
@@ -175,7 +201,9 @@ def price_chart(sym):
         xaxis=dict(type="date", gridcolor="#21262d", color=DIM, rangeslider=dict(visible=False)),
         yaxis=dict(gridcolor="#21262d", color=DIM, side="right"),
         showlegend=False, font=dict(color=TXT))
-    return dcc.Graph(figure=fig, config={"displayModeBar": False},
+    return dcc.Graph(figure=fig, config={"displayModeBar": True, "scrollZoom": True,
+                                         "displaylogo": False,
+                                         "modeBarButtonsToRemove": ["select2d", "lasso2d"]},
                      style={"background": CARD, "borderRadius": "8px"})
 
 

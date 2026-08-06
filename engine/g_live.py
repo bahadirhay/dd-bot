@@ -24,9 +24,9 @@ from core.logger import get_logger
 
 log = get_logger("G-Live")
 
-# ETH CIKARILDI: ana bot (D) ETHUSDT isliyor -> one-way modda ayni pozisyonu netlerlerdi (cakisma).
-# G, D'nin islemedigi coinlerde: AVAX (dogrulanmis p=0.037, likit). Ileride INJ/ETC/SUI (D-disi) eklenebilir.
-COINS = ["AVAXUSDT"]
+# D KAPATILDI (V3_STRATEGY_D_ENABLED=false, 2026-08-06 kullanici karari) -> ETH serbest, cakisma yok.
+# G artik ETH (dogrulanmis p=0.040) + AVAX (p=0.037), ikisi de permutasyon-gercek, likit.
+COINS = ["ETHUSDT", "AVAXUSDT"]
 W = 120           # rolling funding penceresi (40 gun)
 PCT = 0.15        # uc yuzdelik
 HOLD_H = 24       # tutus (backtest ile ayni)

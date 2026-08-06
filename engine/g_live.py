@@ -24,7 +24,9 @@ from core.logger import get_logger
 
 log = get_logger("G-Live")
 
-COINS = ["ETHUSDT", "AVAXUSDT"]
+# ETH CIKARILDI: ana bot (D) ETHUSDT isliyor -> one-way modda ayni pozisyonu netlerlerdi (cakisma).
+# G, D'nin islemedigi coinlerde: AVAX (dogrulanmis p=0.037, likit). Ileride INJ/ETC/SUI (D-disi) eklenebilir.
+COINS = ["AVAXUSDT"]
 W = 120           # rolling funding penceresi (40 gun)
 PCT = 0.15        # uc yuzdelik
 HOLD_H = 24       # tutus (backtest ile ayni)
@@ -252,7 +254,7 @@ def _tick():
 
 
 def _run_forever():
-    log.warning(f"[G-LIVE] GERCEK EMIR AKTIF — ETH/AVAX, margin=${cfg.V3_G_MARGIN_USD} x{cfg.V3_G_LEVERAGE}, "
+    log.warning(f"[G-LIVE] GERCEK EMIR AKTIF — {','.join(c.replace('USDT','') for c in COINS)}, margin=${cfg.V3_G_MARGIN_USD} x{cfg.V3_G_LEVERAGE}, "
                 f"funding-uc %{int(PCT*100)}, tutus {HOLD_H}h, SL {STOP_PCT}%")
     while True:
         try:

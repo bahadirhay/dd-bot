@@ -90,6 +90,13 @@ class Config:
     # Kanitlandi KAYBEDIYOR (-16426 tail'ler). decision_v3 bunu bu flag'e bagli cagirir. Varsayilan
     # false (susturuldu) — .env ile acilabilir. bkz [[dumpfade-liquidity-jul2026]].
     V3_DUMPFADE_PAPER = os.getenv("V3_DUMPFADE_PAPER", "false").lower() in ("1", "true", "yes")
+    # STRATEJI G (funding-konumlanma kontraryan) GERCEK EMIR (engine/g_live.py). VARSAYILAN KAPALI.
+    # Sikı test gecti: permutasyon p=0.0245, fee/4-ceyrek/pct/hold/W platolari. Fiyat-DISI edge.
+    # ETH/AVAX (likit), funding uc (rolling %15) -> kontraryan, 24h/funding-normalize/SL cikis.
+    # Kalan tek bilinmeyen: gercek-fill -> bu modul kucuk boyutla olcer. bkz [[funding-positioning-validated-aug2026]]
+    V3_G_LIVE = os.getenv("V3_G_LIVE", "false").lower() in ("1", "true", "yes")
+    V3_G_MARGIN_USD = float(os.getenv("V3_G_MARGIN_USD", "10"))
+    V3_G_LEVERAGE = int(os.getenv("V3_G_LEVERAGE", "3"))
 
     # mmbot3 yapı / SL-TP (structure_levels + structure_analyzer)
     FS_STRUCT_SL_BUFFER_BPS = 10.0

@@ -221,6 +221,23 @@ def _exit(sym, rec, reason):
 
 
 # ───────── dongu ─────────
+def _seed_funding_done():
+    """Baslangicta (veya downtime sonrasi) o an GECERLI funding donemini 'gorüldü' isaretle ->
+    G yalniz BUNDAN SONRA aciklanan YENI funding'e girer. Boylece bayat/gec giris olmaz; backtest'in
+    'funding-ani girisi' varsayimina sadik kalinir. PARAMETRESIZ (keyfi zaman-esigi yok, edge'e dokunmaz).
+    Not: G baslarken pozisyonu olmayan bir coinde current-donem ucta bile olsa ATLAR, sonraki taze
+    aciklamayi bekler (temkinli; en fazla bir sinyal kacar, testle uyum kazanilir)."""
+    for sym in COINS:
+        with _lock:
+            if sym in _open or sym in _last_funding_done:
+                continue
+        sig = _funding_signal(sym)
+        if sig:
+            _last_funding_done[sym] = sig[2]   # son funding-zamani -> 'islendi' say
+            log.info(f"[G-LIVE] {sym} baslangic: current funding-donemi ({time.strftime('%H:%M', time.localtime(sig[2]))}) "
+                     f"gorüldü isaretlendi; yalniz YENI aciklamalara girilir")
+
+
 def _recover():
     for row in _get_open_db():
         rid, sym, side, ent, qty, ots, funding = row
@@ -300,4 +317,5 @@ def live_tick() -> None:
         log.warning("[G-LIVE] BASKA PROCESS AKTIF (tek-instance kilit) — emir-thread BASLATILMADI")
         return
     _recover()
+    _seed_funding_done()   # bayat/gec giris olmasin: yalniz YENI funding aciklamalarina gir (backtest'e sadik)
     threading.Thread(target=_run_forever, name="g-live", daemon=True).start()

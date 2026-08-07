@@ -144,22 +144,8 @@ def price_chart(sym):
             showlegend=False))
     last_px = kl[-1][4] if kl else 0
 
-    # ANA BOT (D/V3) acik pozisyonu — 8050 gibi entry/SL/TP1/TP2/liq cizgileri
-    mb = main_bot_open(sym)
-    if mb and (mb.get("entry_price") or 0) > 0:
-        d = mb["direction"]; ent = float(mb["entry_price"])
-        _hline(fig, ent, "#c9d1d9", "solid", f"ANA BOT {d} {ent:.4g}", 1.8)
-        if mb.get("sl"):   _hline(fig, float(mb["sl"]), DN, "dash", f"SL {float(mb['sl']):.4g}", 1.5)
-        if mb.get("tp1"):  _hline(fig, float(mb["tp1"]), UP, "dashdot", f"TP1 {float(mb['tp1']):.4g}", 1.5)
-        if mb.get("tp2"):  _hline(fig, float(mb["tp2"]), UP, "dot", f"TP2 {float(mb['tp2']):.4g}", 1.2)
-        if mb.get("liq_price"): _hline(fig, float(mb["liq_price"]), "#6e2020", "dot", f"LIQ {float(mb['liq_price']):.4g}", 1)
-        if mb.get("open_ts"):
-            fig.add_trace(go.Scatter(x=[mb["open_ts"] * 1000], y=[ent], mode="markers",
-                                     marker=dict(symbol="triangle-up" if d == "LONG" else "triangle-down",
-                                                 size=15, color=UP if d == "LONG" else DN,
-                                                 line=dict(color="#fff", width=1.2)), showlegend=False,
-                                     hovertemplate=f"ANA BOT {d} %{{y:.4g}}<extra></extra>"))
-
+    # NOT: ana bot artik PAPER (sadece G canli). G paneli YALNIZ G pozisyonlarini gosterir;
+    # ana botun sanal (paper) pozisyonu buraya cizilmez (yoksa "iki pozisyon" gibi gorunurdu).
     for t in trades_for(sym):
         is_long = t["side"] == "LONG"
         e_col = UP if is_long else DN
@@ -174,7 +160,7 @@ def price_chart(sym):
         if t["status"] == "OPEN":
             # ACIK POZISYON: giris + SL (-10%) + 24h zaman-cikisi cizgileri (D dashboard gibi)
             sl = ent * (1 + STOP_PCT / 100) if is_long else ent * (1 - STOP_PCT / 100)
-            _hline(fig, ent, "#c9d1d9", "solid", f"GIRIS {ent:.4g}", 1.6)
+            _hline(fig, ent, "#c9d1d9", "solid", f"GIRIS {ent:.4g} · ${(t['qty'] or 0)*ent:.0f}", 1.6)
             _hline(fig, sl, DN, "dash", f"SL {sl:.4g} ({STOP_PCT:g}%)", 1.4)
             # 24h cikis: dikey cizgi (fiyat-TP degil, zaman-TP)
             exit_ms = (t["open_ts"] + HOLD_H * 3600) * 1000
@@ -195,16 +181,31 @@ def price_chart(sym):
                                      marker=dict(symbol="x", size=12, color=x_col), showlegend=False,
                                      hovertemplate=f"cikis %{{y:.4g}} ({t['pnl_bps']:+.0f}bps)<extra></extra>"))
 
+    # VARSAYILAN GORUNUM: son ~96 mum (24h) mumlara odakli -> okunur. SL/24h cizgileri view disinda
+    # kalabilir; kullanici PAN ile (surukleyerek) asagi/saga kaydirip gorur. dragmode=pan.
+    x0 = x1 = y0 = y1 = None
+    if kl:
+        vis = kl[-96:] if len(kl) >= 96 else kl
+        x0 = vis[0][0]
+        x1 = kl[-1][0] + 8 * 3600 * 1000          # sagda ~8h bosluk (giris ucgeni/nefes payi)
+        lows = [k[3] for k in vis]; highs = [k[2] for k in vis]
+        pad = (max(highs) - min(lows)) * 0.12 or (max(highs) * 0.002)
+        y0, y1 = min(lows) - pad, max(highs) + pad
+
     fig.update_layout(
-        height=340, margin=dict(l=8, r=64, t=28, b=8), paper_bgcolor=CARD, plot_bgcolor=CARD,
-        title=dict(text=sym.replace("USDT", "") + " · 15m", x=0.01, font=dict(color=TXT, size=13)),
-        xaxis=dict(type="date", gridcolor="#21262d", color=DIM, rangeslider=dict(visible=False)),
-        yaxis=dict(gridcolor="#21262d", color=DIM, side="right"),
-        showlegend=False, font=dict(color=TXT))
-    return dcc.Graph(figure=fig, config={"displayModeBar": True, "scrollZoom": True,
-                                         "displaylogo": False,
-                                         "modeBarButtonsToRemove": ["select2d", "lasso2d"]},
-                     style={"background": CARD, "borderRadius": "8px"})
+        height=420, margin=dict(l=8, r=70, t=30, b=24), paper_bgcolor=CARD, plot_bgcolor="#0d1117",
+        dragmode="pan",
+        title=dict(text=sym.replace("USDT", "") + " · 15m", x=0.01, font=dict(color=TXT, size=14)),
+        xaxis=dict(type="date", gridcolor="#1c2230", color=DIM, rangeslider=dict(visible=False),
+                   range=[x0, x1] if x0 else None),
+        yaxis=dict(gridcolor="#1c2230", color=DIM, side="right", range=[y0, y1] if y0 else None,
+                   tickformat=".4g"),
+        showlegend=False, font=dict(color=TXT), hovermode="x unified")
+    return dcc.Graph(figure=fig, config={
+        "displayModeBar": True, "scrollZoom": True, "displaylogo": False,
+        "modeBarButtonsToRemove": ["select2d", "lasso2d"], "doubleClick": "autosize",
+        "scrollZoom": True},
+        style={"background": CARD, "borderRadius": "8px"})
 
 
 def chip(label, value, color=TXT):
@@ -286,10 +287,13 @@ def open_table(rows):
         pnl_pct = ((mk - ent) if side == 1 else (ent - mk)) / ent * 100 if (mk and ent) else 0.0
         held = (time.time() - r["open_ts"]) / 3600.0
         col = UP if pnl_pct >= 0 else DN
+        notional = (r["qty"] or 0) * ent
+        lev = max(float(getattr(cfg, "V3_G_LEVERAGE", 3)), 1)
         body.append(html.Tr([
             td(r["symbol"].replace("USDT", ""), bold=True),
             td(r["side"], UP if side == 1 else DN, bold=True),
             td(f"{ent:.4g}"),
+            td(f"${notional:.0f}  ·  tem ${notional/lev:.0f}", TXT, bold=True),
             td(f"{mk:.4g}" if mk else "-"),
             td(f"{pnl_pct:+.2f}%", col, bold=True),
             td(f"{(r['funding'] or 0)*100:+.4f}%", DIM),
@@ -297,8 +301,8 @@ def open_table(rows):
             td(r["open_human"] or "", DIM),
         ]))
     return html.Table([
-        html.Thead(html.Tr([th("coin"), th("yon"), th("giris"), th("mark"), th("canli pnl"),
-                            th("funding"), th("tutus"), th("acilis")])),
+        html.Thead(html.Tr([th("coin"), th("yon"), th("giris"), th("buyukluk (tem.)"), th("mark"),
+                            th("canli pnl"), th("funding"), th("tutus"), th("acilis")])),
         html.Tbody(body),
     ], style={"width": "100%", "borderCollapse": "collapse", "background": CARD, "borderRadius": "8px"})
 

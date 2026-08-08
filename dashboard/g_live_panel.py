@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from core.config import cfg
 from engine.g_live import (
-    COINS, W, PCT, HOLD_H, STOP_PCT, MAX_DAILY_LOSS_PCT,
+    COINS, W, PCT, HOLD_H, MAX_DAILY_LOSS_PCT,
     _funding_signal, _mark,
 )
 
@@ -158,11 +158,9 @@ def price_chart(sym):
                                  showlegend=False,
                                  hovertemplate=f"{t['side']} giris %{{y:.4g}}<extra></extra>"))
         if t["status"] == "OPEN":
-            # ACIK POZISYON: giris + SL (-10%) + 24h zaman-cikisi cizgileri (D dashboard gibi)
-            sl = ent * (1 + STOP_PCT / 100) if is_long else ent * (1 - STOP_PCT / 100)
+            # ACIK POZISYON: giris + 24h zaman-cikisi (SL YOK — backtest birebir, sadece 24h).
             _hline(fig, ent, "#c9d1d9", "solid", f"GIRIS {ent:.4g} · ${(t['qty'] or 0)*ent:.0f}", 1.6)
-            _hline(fig, sl, DN, "dash", f"SL {sl:.4g} ({STOP_PCT:g}%)", 1.4)
-            # 24h cikis: dikey cizgi (fiyat-TP degil, zaman-TP)
+            # 24h cikis: dikey cizgi (fiyat-TP/SL yok; sadece zaman-cikisi)
             exit_ms = (t["open_ts"] + HOLD_H * 3600) * 1000
             fig.add_vline(x=exit_ms, line_dash="dot", line_color=ACC, line_width=1.4,
                           annotation_text="24h cikis", annotation_position="top",
@@ -375,9 +373,10 @@ def render(_n):
 
     return [
         header_row(),
-        html.Div(f"ETH+AVAX  ·  funding-uc %{int(PCT*100)} (rolling {W} donem)  ·  tutus {HOLD_H}h  ·  "
-                 f"SL {STOP_PCT}%  ·  ${cfg.V3_G_MARGIN_USD:g}x{cfg.V3_G_LEVERAGE}=${notional:g} notional  ·  "
-                 f"gunluk-zarar limiti %{MAX_DAILY_LOSS_PCT:g} (kendi guard'i, D'den bagimsiz)",
+        html.Div(f"{','.join(c.replace('USDT','') for c in COINS)}  ·  funding-uc %{int(PCT*100)} (rolling {W} donem)  ·  "
+                 f"tutus {HOLD_H}h  ·  UST-USTE izinli (coinde max 3)  ·  SL YOK (backtest birebir)  ·  "
+                 f"${cfg.V3_G_MARGIN_USD:g}x{cfg.V3_G_LEVERAGE}=${notional:g}/pozisyon  ·  "
+                 f"gunluk-zarar guard %{MAX_DAILY_LOSS_PCT:g}",
                  style={"color": DIM, "fontSize": "12px", "marginBottom": "16px"}),
 
         html.Div("HESAP BAKIYESI (canli, ▲/▼ = son 20sn yon)", style={"color": DIM, "fontSize": "12px",

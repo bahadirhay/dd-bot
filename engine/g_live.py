@@ -34,8 +34,9 @@ HOLD_H = 24       # tutus (backtest ile ayni)
 FRESH_MAX_MIN = 60  # TAZELIK: funding ancak son 60 dk icinde aciklandiysa gir (backtest funding-ani
                     # girisine sadik). Daha eski=bayat -> atla, sonraki taze aciklamayi bekle. 8h dongunun
                     # cok altinda; startup + 24h-kapanis-sonrasi re-entry'de gec/hareketli fiyattan girisi onler.
-STOP_PCT = -10.0  # felaket-SL (fiyat, aleyhte %); backtest'te yoktu, nadir teter
-FEE_EST = 12.0    # log icin (giris+cikis taker + slippage tahmini)
+# SL KALDIRILDI (2026-08-08 kullanici: backtest'le birebir). Backtest'te stop YOK; pozisyon
+# tam HOLD_H tutulur. Felaket-SL de yok artik -> risk daha yuksek, bilincli tercih.
+FEE_EST = 12.0    # log icin (giris+cikis taker + slippage tahmini); backtest FEE=12 ile ayni
 MAX_DAILY_LOSS_PCT = 15.0   # kendi gunluk-zarar limiti
 LOCK_PORT = 57602
 
@@ -199,13 +200,18 @@ def _enter(sym, side, funding, ftime):
     entry_px = float(r.get("avgPrice") or 0) or px
     rid = _log_open(sym, "LONG" if side == 1 else "SHORT", funding, entry_px, qty, r.get("orderId"))
     with _lock:
-        _open[sym] = {"db_id": rid, "side": side, "entry_px": entry_px, "qty": qty,
+        # _open POZISYON-BASI (db_id ile) — ayni coinde UST USTE birden fazla olabilir (backtest gibi).
+        # Borsa one-way modda bunlari netler; yazilim her mantiksal pozisyonu ayri takip eder
+        # (kendi giris fiyati + kendi 24h sayaci), cikista kendi qty'siyle reduceOnly kapatir.
+        _open[rid] = {"db_id": rid, "sym": sym, "side": side, "entry_px": entry_px, "qty": qty,
                       "open_ts": int(time.time()), "funding_time": ftime}
         _last_funding_done[sym] = ftime
+        n_sym = sum(1 for p in _open.values() if p["sym"] == sym)
     log.warning(f"[G-LIVE] GIRIS {sym} {'LONG' if side==1 else 'SHORT'} @{entry_px:.4g} "
-                f"qty={qty:g} funding={funding*100:+.4f}% (${notional:.0f} notional)")
+                f"qty={qty:g} funding={funding*100:+.4f}% (${notional:.0f} notional) [coinde {n_sym} pozisyon]")
 
-def _exit(sym, rec, reason):
+def _exit(rec, reason):
+    sym = rec["sym"]
     step, _ = _filters.get(sym, (0.001, 5.0))
     close_side = "SELL" if rec["side"] == 1 else "BUY"
     r = _signed("POST", "/fapi/v1/order", {"symbol": sym, "side": close_side, "type": "MARKET",
@@ -219,7 +225,7 @@ def _exit(sym, rec, reason):
     pnl_usd = raw / 1e4 * (rec["qty"] * ent)   # notional bazli yaklasik
     _log_close(rec["db_id"], ex, pnl_bps, pnl_usd, reason)
     with _lock:
-        _open.pop(sym, None)
+        _open.pop(rec["db_id"], None)
     log.warning(f"[G-LIVE] CIKIS {sym} ({reason}) @{ex:.4g} = {pnl_bps:+.0f}bps (${pnl_usd:+.3f})")
 
 
@@ -228,32 +234,22 @@ def _recover():
     for row in _get_open_db():
         rid, sym, side, ent, qty, ots, funding = row
         with _lock:
-            _open[sym] = {"db_id": rid, "side": 1 if side == "LONG" else -1, "entry_px": ent,
-                          "qty": qty, "open_ts": ots, "funding_time": 0}
+            _open[rid] = {"db_id": rid, "sym": sym, "side": 1 if side == "LONG" else -1,
+                          "entry_px": ent, "qty": qty, "open_ts": ots, "funding_time": 0}
     if _open:
-        log.info(f"[G-LIVE] restart-restore: {len(_open)} acik pozisyon geri yuklendi ({list(_open)})")
+        log.info(f"[G-LIVE] restart-restore: {len(_open)} acik pozisyon geri yuklendi")
 
 def _tick():
-    # 1) acik pozisyonlari yonet (SL + 24h)
+    # 1) acik pozisyonlari yonet — SADECE 24h cikis (backtest gibi; SL YOK). Her pozisyon BAGIMSIZ.
     with _lock:
-        syms = list(_open.keys())
-    for sym in syms:
-        with _lock:
-            rec = dict(_open.get(sym) or {})
-        if not rec: continue
-        px = _mark(sym)
-        if px <= 0: continue
-        cur_pct = ((px - rec["entry_px"]) if rec["side"] == 1 else (rec["entry_px"] - px)) / rec["entry_px"] * 100
-        held_h = (time.time() - rec["open_ts"]) / 3600.0
-        if cur_pct <= STOP_PCT:
-            _exit(sym, rec, "sl")
-        elif held_h >= HOLD_H:
-            _exit(sym, rec, "24h")
-    # 2) yeni giris (funding uc + COIN-BASI guard + pozisyon yoksa)
+        recs = [dict(p) for p in _open.values()]
+    for rec in recs:
+        if (time.time() - rec["open_ts"]) / 3600.0 >= HOLD_H:
+            _exit(rec, "24h")
+    # 2) yeni giris — HER taze uc funding-doneminde (UST USTE izinli; 'pozisyon yoksa' KOSULU YOK).
+    #    Boylece backtest gibi: funding uctayken her donem (8h) ayri 24h-pozisyon acilir (coinde max 3).
     for sym in COINS:
-        with _lock:
-            if sym in _open: continue
-        if not _can_trade(sym):   # coin-basi: sadece bu coin bloklanir, digerleri devam
+        if not _can_trade(sym):   # coin-basi guard (tek kalan guvenlik; backtest'te yok, bkz kullaniciya not)
             continue
         sig = _funding_signal(sym)
         if not sig: continue
@@ -276,7 +272,7 @@ def _tick():
 
 def _run_forever():
     log.warning(f"[G-LIVE] GERCEK EMIR AKTIF — {','.join(c.replace('USDT','') for c in COINS)}, margin=${cfg.V3_G_MARGIN_USD} x{cfg.V3_G_LEVERAGE}, "
-                f"funding-uc %{int(PCT*100)}, tutus {HOLD_H}h, SL {STOP_PCT}%")
+                f"funding-uc %{int(PCT*100)}, tutus {HOLD_H}h, UST-USTE izinli (coinde max 3), SL YOK (backtest birebir)")
     while True:
         try:
             _tick()

@@ -31,6 +31,9 @@ COINS = ["ETHUSDT", "AVAXUSDT", "INJUSDT"]
 W = 120           # rolling funding penceresi (40 gun)
 PCT = 0.15        # uc yuzdelik
 HOLD_H = 24       # tutus (backtest ile ayni)
+FRESH_MAX_MIN = 60  # TAZELIK: funding ancak son 60 dk icinde aciklandiysa gir (backtest funding-ani
+                    # girisine sadik). Daha eski=bayat -> atla, sonraki taze aciklamayi bekle. 8h dongunun
+                    # cok altinda; startup + 24h-kapanis-sonrasi re-entry'de gec/hareketli fiyattan girisi onler.
 STOP_PCT = -10.0  # felaket-SL (fiyat, aleyhte %); backtest'te yoktu, nadir teter
 FEE_EST = 12.0    # log icin (giris+cikis taker + slippage tahmini)
 MAX_DAILY_LOSS_PCT = 15.0   # kendi gunluk-zarar limiti
@@ -221,23 +224,6 @@ def _exit(sym, rec, reason):
 
 
 # ───────── dongu ─────────
-def _seed_funding_done():
-    """Baslangicta (veya downtime sonrasi) o an GECERLI funding donemini 'gorüldü' isaretle ->
-    G yalniz BUNDAN SONRA aciklanan YENI funding'e girer. Boylece bayat/gec giris olmaz; backtest'in
-    'funding-ani girisi' varsayimina sadik kalinir. PARAMETRESIZ (keyfi zaman-esigi yok, edge'e dokunmaz).
-    Not: G baslarken pozisyonu olmayan bir coinde current-donem ucta bile olsa ATLAR, sonraki taze
-    aciklamayi bekler (temkinli; en fazla bir sinyal kacar, testle uyum kazanilir)."""
-    for sym in COINS:
-        with _lock:
-            if sym in _open or sym in _last_funding_done:
-                continue
-        sig = _funding_signal(sym)
-        if sig:
-            _last_funding_done[sym] = sig[2]   # son funding-zamani -> 'islendi' say
-            log.info(f"[G-LIVE] {sym} baslangic: current funding-donemi ({time.strftime('%H:%M', time.localtime(sig[2]))}) "
-                     f"gorüldü isaretlendi; yalniz YENI aciklamalara girilir")
-
-
 def _recover():
     for row in _get_open_db():
         rid, sym, side, ent, qty, ots, funding = row
@@ -274,6 +260,15 @@ def _tick():
         side, funding, ftime = sig
         if side == 0: continue
         if _last_funding_done.get(sym) == ftime:   # bu funding-donemi zaten islendi
+            continue
+        # TAZELIK PENCERESI: yalniz YENI aciklanan (son FRESH_MAX_MIN dk) funding'e gir.
+        # Bayatsa (startup'ta veya 24h-kapanis coin-i donem-ortasinda serbest biraktiginda) ATLA,
+        # 'gordum' isaretle, sonraki taze aciklamayi bekle -> backtest'in funding-ani girisine sadik.
+        if time.time() - ftime > FRESH_MAX_MIN * 60:
+            if _last_funding_done.get(sym) != ftime:
+                log.info(f"[G-LIVE] {sym} bayat funding ({int((time.time()-ftime)/60)}dk once) atlandi — "
+                         f"taze aciklama beklenir")
+            _last_funding_done[sym] = ftime
             continue
         _last_funding_done[sym] = ftime
         _enter(sym, side, funding, ftime)
@@ -317,5 +312,4 @@ def live_tick() -> None:
         log.warning("[G-LIVE] BASKA PROCESS AKTIF (tek-instance kilit) — emir-thread BASLATILMADI")
         return
     _recover()
-    _seed_funding_done()   # bayat/gec giris olmasin: yalniz YENI funding aciklamalarina gir (backtest'e sadik)
     threading.Thread(target=_run_forever, name="g-live", daemon=True).start()

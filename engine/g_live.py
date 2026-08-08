@@ -182,8 +182,9 @@ def _enter(sym, side, funding, ftime):
     if qty <= 0 or qty * px < minn:
         log.info(f"[G-LIVE] {sym} miktar/min-notional yetersiz, atlandi"); return
     order_side = "BUY" if side == 1 else "SELL"
+    pos_side = "LONG" if side == 1 else "SHORT"   # HEDGE mod: long/short ayri defter (backtest birebir)
     r = _signed("POST", "/fapi/v1/order", {"symbol": sym, "side": order_side, "type": "MARKET",
-                                           "quantity": _fmt(qty, step), "positionSide": "BOTH"})
+                                           "quantity": _fmt(qty, step), "positionSide": pos_side})
     if not isinstance(r, dict) or not r.get("orderId"):
         log.warning(f"[G-LIVE] {sym} giris emri basarisiz: {r}"); return
     entry_px = float(r.get("avgPrice") or 0) or px
@@ -203,9 +204,9 @@ def _exit(rec, reason):
     sym = rec["sym"]
     step, _ = _filters.get(sym, (0.001, 5.0))
     close_side = "SELL" if rec["side"] == 1 else "BUY"
+    pos_side = "LONG" if rec["side"] == 1 else "SHORT"   # HEDGE: kendi defterinden kapat (reduceOnly YOK)
     r = _signed("POST", "/fapi/v1/order", {"symbol": sym, "side": close_side, "type": "MARKET",
-                                           "quantity": _fmt(rec["qty"], step), "reduceOnly": "true",
-                                           "positionSide": "BOTH"})
+                                           "quantity": _fmt(rec["qty"], step), "positionSide": pos_side})
     ex = float(r.get("avgPrice") or 0) if isinstance(r, dict) else 0.0
     if ex <= 0: ex = _mark(sym)
     ent = rec["entry_px"]

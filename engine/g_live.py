@@ -219,14 +219,31 @@ def _exit(rec, reason):
 
 
 # ───────── dongu ─────────
+def _funding_time_at_or_before(sym, ts):
+    """sym funding gecmisinden ts'den onceki (<=) son settlement zamani."""
+    try:
+        fr = [int(x["fundingTime"]) // 1000 for x in _get(f"{cfg.REST}/fapi/v1/fundingRate?symbol={sym}&limit=10")]
+    except Exception:
+        return None
+    prev = [t for t in fr if t <= ts]
+    return prev[-1] if prev else None
+
 def _recover():
     for row in _get_open_db():
         rid, sym, side, ent, qty, ots, funding = row
         with _lock:
             _open[rid] = {"db_id": rid, "sym": sym, "side": 1 if side == "LONG" else -1,
                           "entry_px": ent, "qty": qty, "open_ts": ots, "funding_time": 0}
+    # RESTART-DUPLIKASYONUNU ONLE: _last_funding_done'i geri kur. Her coin icin, en son acik pozisyonun
+    # girdigi funding-donemini (open_ts'den onceki son settlement) 'islendi' say. Boylece restart AYNI
+    # donemde ikinci pozisyon ACMAZ; yalniz GERCEK yeni funding-doneminde ust-uste acar (backtest gibi).
+    for sym in set(p["sym"] for p in _open.values()):
+        latest_ots = max(p["open_ts"] for p in _open.values() if p["sym"] == sym)
+        ft = _funding_time_at_or_before(sym, latest_ots)
+        if ft:
+            _last_funding_done[sym] = ft
     if _open:
-        log.info(f"[G-LIVE] restart-restore: {len(_open)} acik pozisyon geri yuklendi")
+        log.info(f"[G-LIVE] restart-restore: {len(_open)} acik pozisyon + funding-done geri yuklendi ({_last_funding_done})")
 
 def _tick():
     # 1) acik pozisyonlari yonet — SADECE 24h cikis (backtest gibi; SL YOK). Her pozisyon BAGIMSIZ.

@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from core.config import cfg
 from engine.g_live import (
-    COINS, W, PCT, HOLD_H, MAX_DAILY_LOSS_PCT,
+    COINS, W, PCT, HOLD_H,
     _funding_signal, _mark,
 )
 
@@ -369,14 +369,12 @@ def render(_n):
     net = agg["net"] or 0
     usd = agg["usd"] or 0
     notional = float(cfg.V3_G_MARGIN_USD) * float(cfg.V3_G_LEVERAGE)
-    guard_col = DN if today_usd <= -abs(MAX_DAILY_LOSS_PCT) else DIM  # kaba gosterge
 
     return [
         header_row(),
         html.Div(f"{','.join(c.replace('USDT','') for c in COINS)}  ·  funding-uc %{int(PCT*100)} (rolling {W} donem)  ·  "
-                 f"tutus {HOLD_H}h  ·  UST-USTE izinli (coinde max 3)  ·  SL YOK (backtest birebir)  ·  "
-                 f"${cfg.V3_G_MARGIN_USD:g}x{cfg.V3_G_LEVERAGE}=${notional:g}/pozisyon  ·  "
-                 f"gunluk-zarar guard %{MAX_DAILY_LOSS_PCT:g}",
+                 f"tutus {HOLD_H}h  ·  UST-USTE izinli (coinde max 3)  ·  SL YOK  ·  guard YOK  ·  "
+                 f"${cfg.V3_G_MARGIN_USD:g}x{cfg.V3_G_LEVERAGE}=${notional:g}/pozisyon  (backtest birebir)",
                  style={"color": DIM, "fontSize": "12px", "marginBottom": "16px"}),
 
         html.Div("HESAP BAKIYESI (canli, ▲/▼ = son 20sn yon)", style={"color": DIM, "fontSize": "12px",

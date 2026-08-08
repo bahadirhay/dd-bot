@@ -37,7 +37,6 @@ FRESH_MAX_MIN = 60  # TAZELIK: funding ancak son 60 dk icinde aciklandiysa gir (
 # SL KALDIRILDI (2026-08-08 kullanici: backtest'le birebir). Backtest'te stop YOK; pozisyon
 # tam HOLD_H tutulur. Felaket-SL de yok artik -> risk daha yuksek, bilincli tercih.
 FEE_EST = 12.0    # log icin (giris+cikis taker + slippage tahmini); backtest FEE=12 ile ayni
-MAX_DAILY_LOSS_PCT = 15.0   # kendi gunluk-zarar limiti
 LOCK_PORT = 57602
 
 _open: dict = {}          # symbol -> pozisyon kaydi
@@ -162,18 +161,8 @@ def _funding_signal(sym):
     return (0, rate, ts)
 
 
-# ───────── guard ─────────
-def _can_trade(sym):
-    """COIN-BASI gunluk-zarar guard'i: her coin kendi bugunku realized zararina bakar.
-    Testlerde her coin BAGIMSIZ dogrulandi -> bir coinin kotu gunu digerlerini ETKILEMEZ."""
-    eq = _equity()
-    if eq <= 0: return True
-    pct = _today_realized_usd(sym) / eq * 100.0
-    if pct <= -MAX_DAILY_LOSS_PCT:
-        log.warning(f"[G-LIVE] {sym} gunluk-zarar limiti ({pct:.1f}%) — bugun SADECE {sym} yeni giris yok "
-                    f"(diger coinler ETKILENMEZ)")
-        return False
-    return True
+# GUARD KALDIRILDI (2026-08-08 kullanici: backtest'le BIREBIR). Backtest'te gunluk-zarar limiti
+# yoktu -> her uc funding-doneminde kosulsuz girilir. Hicbir non-backtest fren kalmadi.
 
 
 # ───────── emir ─────────
@@ -249,8 +238,6 @@ def _tick():
     # 2) yeni giris — HER taze uc funding-doneminde (UST USTE izinli; 'pozisyon yoksa' KOSULU YOK).
     #    Boylece backtest gibi: funding uctayken her donem (8h) ayri 24h-pozisyon acilir (coinde max 3).
     for sym in COINS:
-        if not _can_trade(sym):   # coin-basi guard (tek kalan guvenlik; backtest'te yok, bkz kullaniciya not)
-            continue
         sig = _funding_signal(sym)
         if not sig: continue
         side, funding, ftime = sig

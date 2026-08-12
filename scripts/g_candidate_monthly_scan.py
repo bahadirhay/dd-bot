@@ -10,7 +10,8 @@ Sonuc: reports/g_scan_YYYY-MM-DD.txt + yeni SAGLAM aday (canli/izleme-disi) vurg
 import urllib.request, json, time, bisect, random, os
 random.seed(7)
 W=120; HOLD=24; PCT=0.15; FEE=12.0; NPERM=1000
-MIN_VOL_M=20.0   # 24h quote-hacim tabani (milyon USDT) — altindakiler 'illikit' isaretlenir
+MIN_VOL_M=10.0   # 24h quote-hacim tabani (milyon USDT). $30 emir icin dusuk; asil amac backtest-guvenilirligi
+                 # (cok-thin coinde funding-ani fiyati yaniltir, poc_atr dersi). ORDI/QNT gibi <$10M elenir.
 LIVE={"ETHUSDT","AVAXUSDT","INJUSDT"}
 WATCH={"ETCUSDT","SUIUSDT","XRPUSDT","LINKUSDT"}
 
@@ -78,24 +79,29 @@ def main():
         if r: res.append(r)
         else: print("  %-9s veri az/atla"%sym.replace("USDT",""))
     N=len(res); bonf=0.05/max(N,1)
-    print("\n  test edilen: %d | Bonferroni esigi p < %.4f (0.05/%d)\n"%(N,bonf,N))
-    # siniflandir
+    print("\n  test edilen: %d | SAGLAM standardi = CANLI-COIN ile AYNI (ETH/AVAX/INJ boyle bulundu):"%N)
+    print("    permut p<0.05 + iki-yari-pozitif + likit>=$%.0fM. Bonferroni (p<%.4f) sadece INFO [B+]."%(MIN_VOL_M,bonf))
+    print("    Asil out-of-sample kalkan = FORWARD-SHADOW (paper), sert backtest-esigi DEGIL.\n")
+    # siniflandir — SAGLAM = canli-coin standardi (permut+iki-yari+likit). Bonferroni RED-kriteri DEGIL, INFO.
     for r in res:
         r["likit"]=r["vol"]>=MIN_VOL_M
-        r["robust"]=(r["p"]<bonf and r["net"]>0 and r["h1"]>0 and r["h2"]>0 and r["likit"])
+        r["robust"]=(r["p"]<0.05 and r["net"]>0 and r["h1"]>0 and r["h2"]>0 and r["likit"])
+        r["bonf_pass"]=(r["p"]<bonf)
         r["pass_weak"]=(r["p"]<0.05 and r["net"]>0 and not r["robust"])
     robust=sorted([r for r in res if r["robust"]],key=lambda x:x["p"])
     weak=sorted([r for r in res if r["pass_weak"]],key=lambda x:x["p"])
     def line(r):
         loc="CANLI" if r["sym"] in LIVE else ("izle" if r["sym"] in WATCH else "YENI")
-        return "  %-9s n=%3d net=%+6.0f isl=%+5.1f p=%.4f 1y=%+5.0f 2y=%+5.0f hac=%5.0fM [%s]"%(
-            r["sym"].replace("USDT",""),r["n"],r["net"],r["per"],r["p"],r["h1"],r["h2"],r["vol"],loc)
-    print("=== SAGLAM (Bonferroni-gecer + iki-yari-poz + likit) ===")
+        bf="B+" if r.get("bonf_pass") else "  "
+        return "  %-9s n=%3d net=%+6.0f isl=%+5.1f p=%.4f %s 1y=%+5.0f 2y=%+5.0f hac=%5.0fM [%s]"%(
+            r["sym"].replace("USDT",""),r["n"],r["net"],r["per"],r["p"],bf,r["h1"],r["h2"],r["vol"],loc)
+    print("=== SAGLAM (canli-coin standardi: permut p<0.05 + iki-yari-poz + likit; B+=Bonferroni de gecer) ===")
     for r in robust: print(line(r))
     if not robust: print("  (yok)")
     yeni=[r for r in robust if r["sym"] not in LIVE and r["sym"] not in WATCH]
-    print("\n  >>> YENI SAGLAM ADAY (canli/izleme disi): %s"%(", ".join(r["sym"].replace("USDT","") for r in yeni) or "YOK"))
-    print("\n=== zayif-gecen (ham p<0.05 ama Bonferroni/iki-yari/likidite DUSTU — ALMA, tuzak) ===")
+    print("\n  >>> YENI SAGLAM ADAY (canli/izleme disi) -> funding_shadow'a ekle, forward tut: %s"%(
+        ", ".join(r["sym"].replace("USDT","") for r in yeni) or "YOK"))
+    print("\n=== zayif-gecen (p<0.05 ama iki-yari-tutarsiz VEYA illikit — ALMA, tuzak) ===")
     for r in weak[:15]: print(line(r))
     print("\n  NOT: 'YENI SAGLAM' cikarsa -> once funding_shadow'a (paper) ekle, forward tut, sonra kucuk-canli.")
     print("  Hicbir sey cikmamasi NORMAL ve saglikli; sans-seviyesi coklu-testte gizlenir.")

@@ -9,7 +9,11 @@ MAIN=["ETHUSDT","AVAXUSDT"]              # likit + permutasyon p<0.05 (canli-onc
 SCAN=["INJUSDT","ETCUSDT","SUIUSDT"]     # genis-tarama p<0.05 (INJ p=0.000, ETC 0.005, SUI 0.010)
                                           # AMA az-likit -> forward-fill'de +130/+75 erir mi? OLC.
 WATCH=["XRPUSDT","LINKUSDT"]             # sinirda (p~0.05)
-COINS=MAIN+SCAN+WATCH
+# 2026-08-11 aylik tarama yeni-adaylari (canli-coin standardi: permut p<0.05 + iki-yari-poz + likit):
+# HBAR (p=0.032, iki-yari +2167/+2522, $15M), RENDER (p=0.043, +3375/+1764, $17M) — ETH/AVAX seviyesinde.
+# Forward tutarsa kucuk-canli adayi. Bonferroni'yi gecmezler ama canli coinler de gecmiyor (bkz memory).
+CANDID=["HBARUSDT","RENDERUSDT"]
+COINS=MAIN+SCAN+WATCH+CANDID
 DB=os.path.join(os.path.dirname(__file__),"..","data","funding_shadow.db")
 FEE=6.0; HOLD=24; W=120; PCT=0.15
 FORWARD_TS=dt.datetime(2026,8,5,0,0).timestamp()

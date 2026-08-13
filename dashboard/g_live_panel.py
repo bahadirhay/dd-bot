@@ -332,6 +332,19 @@ def closed_table(rows):
 app = dash.Dash(__name__)
 app.title = "Strateji G — Canli"
 
+# ── BASIC-AUTH (internete acildiginda finansal veri korumasi) ─────────────────
+# Kimlik .env'den (G_PANEL_USER/G_PANEL_PASS); git'e girmez. Env yoksa auth KAPALI (yerel-guvenli).
+_AUTH_USER = os.getenv("G_PANEL_USER", "")
+_AUTH_PASS = os.getenv("G_PANEL_PASS", "")
+if _AUTH_USER and _AUTH_PASS:
+    from flask import request, Response
+
+    @app.server.before_request
+    def _require_auth():
+        a = request.authorization
+        if not a or a.username != _AUTH_USER or a.password != _AUTH_PASS:
+            return Response("Yetki gerekli", 401, {"WWW-Authenticate": 'Basic realm="Strateji G"'})
+
 app.layout = html.Div([
     dcc.Interval(id="tick", interval=20_000, n_intervals=0),
     html.Div(id="body", style={"maxWidth": "1100px", "margin": "0 auto"}),

@@ -15,14 +15,15 @@ MIN_VOL_M=10.0   # 24h quote-hacim tabani (milyon USDT). $30 emir icin dusuk; as
 LIVE={"ETHUSDT","AVAXUSDT","INJUSDT"}
 WATCH={"ETCUSDT","SUIUSDT","XRPUSDT","LINKUSDT"}
 
-UNIVERSE=["ETHUSDT","BTCUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT","AVAXUSDT","LINKUSDT",
-"ADAUSDT","DOTUSDT","LTCUSDT","NEARUSDT","ATOMUSDT","UNIUSDT","AAVEUSDT","INJUSDT","SUIUSDT",
-"APTUSDT","ARBUSDT","OPUSDT","FILUSDT","TIAUSDT","SEIUSDT","TONUSDT","TRXUSDT","BCHUSDT",
-"ETCUSDT","XLMUSDT","ICPUSDT","RENDERUSDT","FETUSDT","WLDUSDT","ORDIUSDT","GALAUSDT","IMXUSDT",
-"HBARUSDT","VETUSDT","MKRUSDT","LDOUSDT","GRTUSDT","RUNEUSDT","ALGOUSDT","EGLDUSDT","SANDUSDT",
-"MANAUSDT","AXSUSDT","THETAUSDT","EOSUSDT","ARUSDT","JUPUSDT","JTOUSDT","PENDLEUSDT","DYDXUSDT",
-"GMXUSDT","SNXUSDT","CRVUSDT","COMPUSDT","1INCHUSDT","ENSUSDT","STXUSDT","KAVAUSDT","CFXUSDT",
-"QNTUSDT","FLOWUSDT","CHZUSDT","ENAUSDT","JASMYUSDT","PEOPLEUSDT","ARKMUSDT","BOMEUSDT","WUSDT"]
+def build_universe():
+    """DINAMIK likit-evren: TUM USDT perp'lerini cek, 24h hacim >= MIN_VOL_M olanlari al (~120 coin).
+    Sabit-liste degil -> yeni likit coinler otomatik dahil, illikit (~%80'i) otomatik dislanir."""
+    try:
+        t = json.loads(urllib.request.urlopen(BASE + "/fapi/v1/ticker/24hr", timeout=25).read())
+    except Exception:
+        return []
+    return sorted(x["symbol"] for x in t
+                  if x["symbol"].endswith("USDT") and float(x.get("quoteVolume", 0)) / 1e6 >= MIN_VOL_M)
 
 BASE="https://fapi.binance.com"
 def funding(sym,limit=1000):
@@ -71,7 +72,9 @@ def analyze(sym):
     return dict(sym=sym,n=n,net=net,per=net/n,p=ge/NPERM,h1=n1,h2=n2,vol=vol24(sym))
 
 def main():
-    print("=== G ADAY KESIF TARAMASI | %s | %d likit coin ==="%(time.strftime("%Y-%m-%d %H:%M"),len(UNIVERSE)))
+    UNIVERSE = build_universe()
+    print("=== G ADAY KESIF TARAMASI | %s | %d likit coin (24h hacim >= $%.0fM, TUM perp'ten dinamik) ==="%(
+        time.strftime("%Y-%m-%d %H:%M"), len(UNIVERSE), MIN_VOL_M))
     print("  filtreler: permut(1000) + iki-yari + Bonferroni + likidite>=$%.0fM | fee12 W120 hold24\n"%MIN_VOL_M)
     res=[]
     for sym in UNIVERSE:

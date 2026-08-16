@@ -24,10 +24,11 @@ from core.logger import get_logger
 
 log = get_logger("G-Live")
 
-# G coinleri — hepsi BAGIMSIZ dogrulandi (permutasyon + iki-yari tutarlilik, taze veri 2026-08-06):
-#   ETH p=0.027 (+37/isl), AVAX p=0.038 (+37), INJ p=0.002 (+126, iki-yari +6010/+7585, Bonferroni-gecer).
-# ETC/SUI iki-yari tutarsiz (tek-pencere) -> ALINMADI. Guard COIN-BASI (biri digerini etkilemez).
-COINS = ["ETHUSDT", "AVAXUSDT", "INJUSDT"]
+# G coinleri. ETH/AVAX canli-pozitif (ETH +51bps, AVAX +158bps/isl).
+# INJ CIKARILDI (2026-08-16): in-sample p=0.002 GECTI ama CANLIDA COKTU — 8 natUREL islem 1/8 kazanma,
+# -172bps/isl, -$3.80 (hem long hem short kaybetti). Forward-guard calisti (RENDER gibi). Kalabalik
+# INJ'de HAKLI cikiyordu (trend/momentum, reversion degil). Ders: in-sample anlamlilik canliyi GARANTI ETMEZ.
+COINS = ["ETHUSDT", "AVAXUSDT"]
 W = 120           # rolling funding penceresi (40 gun)
 PCT = 0.15        # uc yuzdelik
 HOLD_H = 24       # tutus (backtest ile ayni)

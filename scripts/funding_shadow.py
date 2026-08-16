@@ -13,7 +13,12 @@ WATCH=["XRPUSDT","LINKUSDT"]             # sinirda (p~0.05)
 # HBAR (p=0.032, iki-yari +2167/+2522, $15M), RENDER (p=0.043, +3375/+1764, $17M) — ETH/AVAX seviyesinde.
 # Forward tutarsa kucuk-canli adayi. Bonferroni'yi gecmezler ama canli coinler de gecmiyor (bkz memory).
 CANDID=["HBARUSDT","RENDERUSDT"]
-COINS=MAIN+SCAN+WATCH+CANDID
+# 2026-08-16 GENIS tarama (113 likit coin) yeni SAGLAM adaylari -> forward'da gercek/artefakt ayrilsin.
+# GERCEKCI (~+35-62bps, ETH/AVAX seviyesi): TAO/CL/BZ/ICP.
+# SUPHELI (absurt +139..+1305bps = yeni/volatil coin artefakti, forward'da COKMESI beklenir): AKE/BR/AIO/VELVET/RE.
+# NOT: INJ bu taramada da 'SAGLAM' (p=0.011) cikti AMA canlida kaybetti -> in-sample GUVENILMEZ, forward karar verir.
+CANDID2=["TAOUSDT","CLUSDT","BZUSDT","ICPUSDT","AKEUSDT","BRUSDT","AIOUSDT","VELVETUSDT","REUSDT"]
+COINS=MAIN+SCAN+WATCH+CANDID+CANDID2
 DB=os.path.join(os.path.dirname(__file__),"..","data","funding_shadow.db")
 FEE=6.0; HOLD=24; W=120; PCT=0.15
 FORWARD_TS=dt.datetime(2026,8,5,0,0).timestamp()

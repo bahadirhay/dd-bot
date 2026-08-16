@@ -52,12 +52,15 @@ def _has_table():
 def fetch_state():
     if not _has_table():
         return [], [], {"n": 0, "net": 0, "wins": 0, "usd": 0}, 0.0
-    open_rows = q("SELECT * FROM g_live WHERE status='OPEN' ORDER BY open_ts DESC")
-    closed_rows = q("SELECT * FROM g_live WHERE status='CLOSED' ORDER BY close_ts DESC LIMIT 30")
-    agg = q("SELECT COUNT(*) n, COALESCE(SUM(pnl_bps),0) net, COALESCE(SUM(pnl_usd),0) usd, "
-            "SUM(CASE WHEN pnl_bps>0 THEN 1 ELSE 0 END) wins FROM g_live WHERE status='CLOSED'")
+    # Sadece AKTIF coinleri goster (COINS). Cikarilan coin (INJ vb.) dashboard'da gorunmez.
+    ph = ",".join("?" * len(COINS)); cp = tuple(COINS)
+    open_rows = q(f"SELECT * FROM g_live WHERE status='OPEN' AND symbol IN ({ph}) ORDER BY open_ts DESC", cp)
+    closed_rows = q(f"SELECT * FROM g_live WHERE status='CLOSED' AND symbol IN ({ph}) ORDER BY close_ts DESC LIMIT 30", cp)
+    agg = q(f"SELECT COUNT(*) n, COALESCE(SUM(pnl_bps),0) net, COALESCE(SUM(pnl_usd),0) usd, "
+            f"SUM(CASE WHEN pnl_bps>0 THEN 1 ELSE 0 END) wins FROM g_live WHERE status='CLOSED' AND symbol IN ({ph})", cp)
     day0 = int(time.time() // 86400) * 86400
-    today = q("SELECT COALESCE(SUM(pnl_usd),0) usd FROM g_live WHERE status='CLOSED' AND close_ts>=?", (day0,))
+    today = q(f"SELECT COALESCE(SUM(pnl_usd),0) usd FROM g_live WHERE status='CLOSED' AND close_ts>=? AND symbol IN ({ph})",
+              (day0,) + cp)
     today_usd = float(today[0]["usd"]) if today else 0.0
     return open_rows, closed_rows, (agg[0] if agg else {"n": 0, "net": 0, "wins": 0, "usd": 0}), today_usd
 

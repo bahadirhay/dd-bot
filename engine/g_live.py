@@ -25,10 +25,11 @@ from core.logger import get_logger
 log = get_logger("G-Live")
 
 # G coinleri. ETH/AVAX canli-pozitif (ETH +51bps, AVAX +158bps/isl).
-# INJ CIKARILDI (2026-08-16): in-sample p=0.002 GECTI ama CANLIDA COKTU — 8 natUREL islem 1/8 kazanma,
-# -172bps/isl, -$3.80 (hem long hem short kaybetti). Forward-guard calisti (RENDER gibi). Kalabalik
-# INJ'de HAKLI cikiyordu (trend/momentum, reversion degil). Ders: in-sample anlamlilik canliyi GARANTI ETMEZ.
-COINS = ["ETHUSDT", "AVAXUSDT"]
+# 2026-08-16 EKLENDI: XRP + ETC — FORWARD-shadow pozitif + islem-basi ETH/AVAX seviyesinde
+# (XRP forward +840/14isl/+60bps, ETC +731/18isl/+41bps). Kucuk boyut -> downside sinirli; canlida gor.
+# DISCIPLIN: INJ gibi kaybederse HIZLA CIKAR (coin-basi karar). Eklenmeyenler: AKE/BR/VELVET/RE=varyans
+# tuzagi (absurt +300..1573bps=volatilite), TAO/AIO=ince edge, forward-negatifler (INJ/SUI/CL/BZ/LINK).
+COINS = ["ETHUSDT", "AVAXUSDT", "XRPUSDT", "ETCUSDT"]
 W = 120           # rolling funding penceresi (40 gun)
 PCT = 0.15        # uc yuzdelik
 HOLD_H = 24       # tutus (backtest ile ayni)

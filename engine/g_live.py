@@ -39,6 +39,9 @@ FRESH_MAX_MIN = 60  # TAZELIK: funding ancak son 60 dk icinde aciklandiysa gir (
 # SL KALDIRILDI (2026-08-08 kullanici: backtest'le birebir). Backtest'te stop YOK; pozisyon
 # tam HOLD_H tutulur. Felaket-SL de yok artik -> risk daha yuksek, bilincli tercih.
 FEE_EST = 12.0    # log icin (giris+cikis taker + slippage tahmini); backtest FEE=12 ile ayni
+TREND_N = 40      # TREND-ALIGN: gunluk trend lookback (gun). Contrarian giris SADECE gunluk-trendle
+                  # ayni yonde alinir (trende-karsi=backtest -32bps/isl kaybeden). Backtest: +46bps/isl,
+                  # permut p=0.0000, 8-coin, N=20-90 plato, iki-yari+. XRP/LINK negatif->pozitif. Kar 2x.
 LOCK_PORT = 57602
 
 _open: dict = {}          # symbol -> pozisyon kaydi
@@ -163,6 +166,27 @@ def _funding_signal(sym):
     return (0, rate, ts)
 
 
+_dtrend_cache: dict = {}   # sym -> (trend, fetch_ts); gunluk trend saatte bir tazelenir (nadir degisir)
+
+def _daily_trend(sym):
+    """Gunluk trend yonu: +1 (yukselis) / -1 (dusus) / 0 (veri az). close[bugun] vs close[TREND_N gun once].
+    TREND-ALIGN filtresi bunu kullanir: contrarian giris sadece bu yonle AYNI ise alinir."""
+    now = time.time()
+    c = _dtrend_cache.get(sym)
+    if c and now - c[1] < 3600:
+        return c[0]
+    try:
+        r = _get(f"{cfg.REST}/fapi/v1/klines?symbol={sym}&interval=1d&limit={TREND_N + 3}")
+        closes = [float(x[4]) for x in r]
+    except Exception:
+        return 0
+    if len(closes) < TREND_N + 1:
+        return 0
+    trend = 1 if closes[-1] > closes[-1 - TREND_N] else -1
+    _dtrend_cache[sym] = (trend, now)
+    return trend
+
+
 # GUARD KALDIRILDI (2026-08-08 kullanici: backtest'le BIREBIR). Backtest'te gunluk-zarar limiti
 # yoktu -> her uc funding-doneminde kosulsuz girilir. Hicbir non-backtest fren kalmadi.
 
@@ -274,6 +298,13 @@ def _tick():
             _last_funding_done[sym] = ftime
             continue
         _last_funding_done[sym] = ftime
+        # TREND-ALIGN FILTRESI (N=TREND_N gunluk): contrarian yon gunluk-trendle AYNI degilse ATLA.
+        # Backtest: trende-karsi -32bps/isl (kaybeden), trend-uyumlu +46bps/isl (permut p=0.0000).
+        trend = _daily_trend(sym)
+        if trend != 0 and side != trend:
+            log.info(f"[G-LIVE] {sym} TREND-ALIGN atla: {'LONG' if side==1 else 'SHORT'} sinyali "
+                     f"gunluk-trend {'UP' if trend==1 else 'DOWN'} ile TERS (trende-karsi=backtest kaybeden)")
+            continue
         _enter(sym, side, funding, ftime)
 
 

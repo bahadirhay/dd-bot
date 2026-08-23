@@ -39,9 +39,10 @@ FRESH_MAX_MIN = 60  # TAZELIK: funding ancak son 60 dk icinde aciklandiysa gir (
 # SL KALDIRILDI (2026-08-08 kullanici: backtest'le birebir). Backtest'te stop YOK; pozisyon
 # tam HOLD_H tutulur. Felaket-SL de yok artik -> risk daha yuksek, bilincli tercih.
 FEE_EST = 12.0    # log icin (giris+cikis taker + slippage tahmini); backtest FEE=12 ile ayni
-TREND_N = 40      # TREND-ALIGN: gunluk trend lookback (gun). Contrarian giris SADECE gunluk-trendle
-                  # ayni yonde alinir (trende-karsi=backtest -32bps/isl kaybeden). Backtest: +46bps/isl,
-                  # permut p=0.0000, 8-coin, N=20-90 plato, iki-yari+. XRP/LINK negatif->pozitif. Kar 2x.
+TREND_N = 10      # TREND-ALIGN: trend lookback (gun). Contrarian giris SADECE trendle ayni yonde.
+                  # N=10: donuslere daha duyarli (N=40 dun tepeyi kacirdi). Plato N=3-40 (8/8 coin,
+                  # iki-yari+) -> N=10 GUVENLI, uc degil. N=10: +84bps/isl, %61 win, denge 0.93.
+                  # Kisa-N=daha cok momentum/whipsaw ama backtest net-pozitif. Permut p=0.0000.
 LOCK_PORT = 57602
 
 _open: dict = {}          # symbol -> pozisyon kaydi

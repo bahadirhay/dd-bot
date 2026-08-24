@@ -34,8 +34,8 @@ G PANELI - CANLI ERISIM LINKI  ($ts)
 ============================================
 $url
 
-Kullanici: gbot
-Parola   : .env icindeki G_PANEL_PASS
+Kullanici: bahadir
+Parola   : Bh171215
 
 NOT: Bu link her yeniden baslatmada DEGISIR. En guncel link hep bu dosyada.
 "@

@@ -50,6 +50,9 @@ class BotState:
     v3_trade_map: dict = field(default_factory=dict)
     v3_exec_anchor: dict = field(default_factory=dict)
     v3_trade_brain_snapshot: dict = field(default_factory=dict)
+    trend_magic_chart: dict = field(default_factory=dict)
+    trend_magic_shadow: dict = field(default_factory=dict)
+    tm_bar_close_ok: bool = False
     market_narrative: dict = field(default_factory=dict)
     # Son kapanış — aynı yön tekrar giriş hesabı (süre değil, yapı)
     last_trade_exit: dict = field(default_factory=dict)

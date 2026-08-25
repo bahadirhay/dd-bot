@@ -302,7 +302,7 @@ def build_operation_view(price: float = 0.0) -> dict:
             regime_code = "TREND_UP"
         elif v3_align_dir == "DOWN" and v3_aligned:
             regime_code = "TREND_DOWN"
-        elif bool(v3_levels.get("range_valid")):
+        elif bool(v3_levels.get("macro_range_valid") or v3_levels.get("range_valid")):
             regime_code = "RANGE_ACTIVE"
         else:
             regime_code = "REGIME_UNCLEAR"

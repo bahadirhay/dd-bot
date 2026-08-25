@@ -1115,12 +1115,21 @@ def format_direction_score_block(scores: dict[str, Any]) -> str:
     pl = float(scores.get("prob_long_pct", 0) or 0)
     ps = float(scores.get("prob_short_pct", 0) or 0)
     mode = str(scores.get("decision_mode") or "")
+    el = scores.get("entry_long_score")
+    es = scores.get("entry_short_score")
+    sl = scores.get("structure_long_score")
+    ss2 = scores.get("structure_short_score")
     lines = [
         f"LONG_SCORE={ls:.0f}",
         f"SHORT_SCORE={ss:.0f}",
         f"prob_LONG={pl:.1f}% prob_SHORT={ps:.1f}% mode={mode}",
-        "",
     ]
+    if el is not None:
+        lines.append(
+            f"entry_L={float(el):.0f} entry_S={float(es or 0):.0f} | "
+            f"struct_L={float(sl or 0):.0f} struct_S={float(ss2 or 0):.0f}"
+        )
+    lines.append("")
     pick = str(scores.get("pick_line") or "")
     if pick == "EDGE YOK":
         lines.append("EDGE YOK")

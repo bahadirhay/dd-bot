@@ -134,23 +134,43 @@ def update_structure() -> dict:
             "range_locked": range_locked,
         },
     }
+    story = getattr(state, "v3_market_story", None) or {}
+    story_bias = str(story.get("bias") or "NEUTRAL")
+    effective_bias = direction
+    if range_locked and story_bias == "BEAR" and direction != "UP":
+        effective_bias = "BEAR"
+    elif range_locked and story_bias == "BULL" and direction != "DOWN":
+        effective_bias = "BULL"
+
     alignment = {
         "aligned": True,
         "direction": direction,
+        "effective_bias": effective_bias,
+        "story_bias": story_bias,
         "range_locked": range_locked,
         "strength": "INFO",
         "info_only": True,
-        "details": {"1h": direction},
+        "details": {"1h": direction, "story_pattern": story.get("pattern")},
     }
-    snap = {"1h": s1h, "alignment": alignment}
+    snap = {
+        "1h": s1h,
+        "alignment": alignment,
+        "effective_bias": effective_bias,
+        "market_story": story,
+    }
     state.v3_structure = snap
     state.v3_range_locked = range_locked
 
     d1h = s1h.get("details") or {}
+    if range_locked and story_bias in ("BEAR", "BULL") and effective_bias != direction:
+        log.info(
+            f"[STRUCT] 1h dir={direction} range_locked=True "
+            f"→ effective_bias={effective_bias} (15m story={story.get('pattern')})"
+        )
     log.info(
         f"[STRUCT] 1h close_trend n={d1h.get('close_bars')} "
         f"chg={d1h.get('change_pct')}% dir={direction} "
-        f"range_locked={range_locked} (bilgi, kapı degil)"
+        f"range_locked={range_locked} effective={effective_bias} (bilgi, kapı degil)"
     )
     return snap
 

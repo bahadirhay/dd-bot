@@ -193,8 +193,12 @@ def print_full_status():
     zone = str(active.get("zone") or "?")
     locked = bool(active.get("locked"))
 
-    # .env ayarları
-    paper = read_env_key("PAPER_MODE", "true").lower() == "true"
+    # Canlı/paper: config ile aynı mantık (PAPER_MODE veya geçersiz api_key → paper)
+    try:
+        from core.config import is_paper_mode
+        paper = is_paper_mode()
+    except Exception:
+        paper = read_env_key("PAPER_MODE", "true").lower() == "true"
     strategy = read_env_key("ENTRY_MODE", "?")
     v3 = read_env_key("STRATEGY_V3_ENABLED", "false").lower() == "true"
     max_loss = read_env_key("MAX_DAILY_LOSS_PCT", "3.0")

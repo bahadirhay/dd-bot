@@ -21,3 +21,11 @@ __pycache__/
 # --- yedek/gecici ---
 *.bak
 engine/*.bak
+.env.bak*
+.env.bak_*
+
+# --- lokal ayarlar / arac / eski scaffolding (commit edilmez) ---
+.claude/
+tools/cloudflared.exe
+dd-bot-improvements/
+dd-bot-patch/

@@ -108,16 +108,23 @@ def _range_tp_clamp(
     if not bool(getattr(cfg, "V3_RANGE_TP_BAND_CLAMP", True)):
         return tp1, tp2
     side = (side or "").upper()
-    if side == "SHORT" and ref_s > 0:
+    min_frac = max(float(getattr(cfg, "V3_RANGE_TP1_MIN_BAND_FRAC", 0.25) or 0.25), 0.1)
+    if side == "SHORT" and ref_s > 0 and px > ref_s:
         if tp2 > 0 and tp2 < ref_s:
-            tp2 = ref_s                      # runner = kanal desteği
-        if tp1 > 0 and tp1 < tp2:            # tp1 her zaman entry'ye daha yakın (yüksek)
-            tp1 = (px + tp2) / 2.0
-    elif side == "LONG" and ref_r > 0:
+            tp2 = ref_s
+        min_tp1 = px - (px - ref_s) * min_frac
+        if tp1 > 0 and tp1 > min_tp1:
+            tp1 = min_tp1
+        elif tp1 > 0 and tp2 > 0 and tp1 < tp2:
+            tp1 = max((px + tp2) / 2.0, min_tp1)
+    elif side == "LONG" and ref_r > 0 and px < ref_r:
         if tp2 > 0 and tp2 > ref_r:
             tp2 = ref_r
-        if tp1 > 0 and tp1 > tp2:
-            tp1 = (px + tp2) / 2.0
+        max_tp1 = px + (ref_r - px) * min_frac
+        if tp1 > 0 and tp1 < max_tp1:
+            tp1 = max_tp1
+        elif tp1 > 0 and tp1 > tp2:
+            tp1 = min((px + tp2) / 2.0, max_tp1)
     return tp1, tp2
 
 
@@ -325,6 +332,32 @@ def _bar_float(bar: dict, key: str) -> float:
         return float(bar.get(key, 0) or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _support_break_is_sweep(px: float, support: float) -> bool:
+    """
+    Destek altina sarkma gercek kirilim mi, yoksa likidite supurmesi mi?
+
+    Supurme kriteri: kirilim sigligi (destek altinda kucuk buffer icinde) VE son
+    KAPANAN 15m bar destek altinda kapanmamis (yalniz intrabar fitil). Boyle bir
+    durumda BROKEN_SUPPORT devam-shortu acmak, dipte stop-avina yem olmak demektir.
+    """
+    s = float(support or 0)
+    p = float(px or 0)
+    if s <= 0 or p <= 0 or p >= s:
+        return False
+    depth_pct = float(getattr(cfg, "V3_SWEEP_MAX_DEPTH_PCT", 0.0015) or 0.0015)
+    if (s - p) > max(s * depth_pct, 1.5):
+        return False  # derin kirilim = gercek kirilim, supurme degil
+    bars = _recent_bars15(3)
+    if not bars:
+        return False
+    last = bars[-1]
+    last_close = _bar_float(last, "close") or _bar_float(last, "c")
+    if last_close <= 0:
+        return False
+    # Son kapanan bar destek ustunde/uzerinde kapandiysa => fitil/supurme.
+    return last_close >= s
 
 
 def _recent_breakdown_reclaim_high(levels: dict, px: float, support: float) -> float:
@@ -592,6 +625,89 @@ def _nearest_below(levels: dict, px: float, *extra: float) -> float:
     return max(vals) if vals else 0.0
 
 
+def _finalize_range_tp1(
+    direction: str,
+    px: float,
+    sl: float,
+    tp1: float,
+    tp2: float,
+) -> float:
+    """RANGE TP1: yapisal hedef cok yakinsa clamp + min R:R + min bps."""
+    from engine.structure_levels import _ensure_tp1_min_rr
+
+    if px <= 0 or tp1 <= 0:
+        return tp1
+    risk = abs(sl - px) if direction == "SHORT" else abs(px - sl)
+    if risk <= 0:
+        return tp1
+    min_rr = max(float(getattr(cfg, "V3_TP1_MIN_RR", 1.0) or 1.0), 1.0)
+    min_bps = max(
+        float(getattr(cfg, "V3_RANGE_TP1_MIN_BPS", 60) or 60),
+        float(getattr(cfg, "BREAK_TP1_LOCAL_MIN_BPS", 60) or 60),
+    )
+    out = _clamp_tp1(direction, px, risk, tp1)
+    dist_bps = abs(out - px) / px * 10000.0 if px > 0 else 0.0
+    if dist_bps < min_bps:
+        out = _ensure_tp1_min_rr(direction, px, sl, out, min_rr)
+    min_dist = px * (min_bps + 1.0) / 10000.0 if px > 0 else 0.0
+    if min_dist > 0:
+        if direction == "SHORT":
+            out = min(out, px - min_dist)
+        else:
+            out = max(out, px + min_dist)
+    if direction == "SHORT" and tp2 > 0 and out <= tp2:
+        out = max(out, tp2 + 0.01)
+    elif direction == "LONG" and tp2 > 0 and out >= tp2:
+        out = min(out, tp2 - 0.01)
+    return round(out, 2)
+
+
+def tp1_distance_bps(entry: float, tp1: float) -> float:
+    if entry <= 0 or tp1 <= 0:
+        return 0.0
+    return abs(tp1 - entry) / entry * 10000.0
+
+
+def range_tp1_min_bps() -> float:
+    return max(
+        float(getattr(cfg, "V3_RANGE_TP1_MIN_BPS", 60) or 60),
+        float(getattr(cfg, "BREAK_TP1_LOCAL_MIN_BPS", 60) or 60),
+    )
+
+
+def tp1_too_close_to_entry(direction: str, entry: float, tp1: float) -> bool:
+    if entry <= 0 or tp1 <= 0:
+        return True
+    if direction == "SHORT" and not (0 < tp1 < entry):
+        return True
+    if direction == "LONG" and not (tp1 > entry):
+        return True
+    return tp1_distance_bps(entry, tp1) < range_tp1_min_bps()
+
+
+def _clamp_tp1(direction: str, px: float, risk: float, natural: float) -> float:
+    """
+    TP1'i [MIN_RR*risk, MAX_RR*risk] araligina sabitle. Structural target
+    dogrudan TP1 olamaz: ne girise yapisik mikro-TP (RR<1, churn kaynagi)
+    ne de uzak/bayat swing (or. 1987 -> RR=28 sahte). natural = pivot target.
+    """
+    if px <= 0 or risk <= 0:
+        return natural
+    min_rr = max(float(getattr(cfg, "V3_TP1_MIN_RR", 1.0) or 1.0), 0.3)
+    max_rr = max(float(getattr(cfg, "V3_TP1_MAX_RR", 3.0) or 3.0), min_rr)
+    if direction == "SHORT":
+        near = px - risk * min_rr   # girise en yakin gecerli TP1 (en yuksek fiyat)
+        far = px - risk * max_rr    # en uzak gecerli TP1 (en dusuk fiyat)
+        if not (0 < natural < px):
+            return round(near, 2)
+        return round(min(near, max(far, natural)), 2)
+    near = px + risk * min_rr
+    far = px + risk * max_rr
+    if not (natural > px):
+        return round(near, 2)
+    return round(max(near, min(far, natural)), 2)
+
+
 def _entry_from_geometry(
     direction: str,
     *,
@@ -621,13 +737,14 @@ def _entry_from_geometry(
         reward = target - px
         order_dir = "BUY"
     rr = reward / risk if risk > 0 and reward > 0 else 0.0
+    tp1 = _clamp_tp1(direction, px, risk, target)
     return {
         "valid": rr >= float(getattr(cfg, "V3_MIN_RR_RATIO", 2.0) or 2.0),
         "direction": order_dir,
         "entry_type": entry_type,
         "price": px,
         "sl": invalidation,
-        "tp1": target,
+        "tp1": tp1,
         "tp2": target,
         "rr": rr,
         "preview": False,
@@ -662,9 +779,8 @@ def _entry_from_breakout_geometry(
         if risk <= 0:
             return _entry_from_geometry(direction, px=px, invalidation=invalidation, target=target, entry_type=entry_type)
         natural = target if 0 < target < px else 0.0
-        min_tp1 = px - risk * tp1_min_rr
         # TP1 ilk lokal demand/dip bolgesidir; min R:R hedefi runner/TP2 tarafinda kalir.
-        tp1 = natural if natural > 0 else min_tp1
+        tp1 = _clamp_tp1("SHORT", px, risk, natural)
         tp2 = min(natural if natural > 0 else px, px - risk * min_rr)
         reward = px - tp2
         order_dir = "SELL"
@@ -673,9 +789,8 @@ def _entry_from_breakout_geometry(
         if risk <= 0:
             return _entry_from_geometry(direction, px=px, invalidation=invalidation, target=target, entry_type=entry_type)
         natural = target if target > px else 0.0
-        min_tp1 = px + risk * tp1_min_rr
         # TP1 ilk lokal supply/tepe bolgesidir; min R:R hedefi runner/TP2 tarafinda kalir.
-        tp1 = natural if natural > 0 else min_tp1
+        tp1 = _clamp_tp1("LONG", px, risk, natural)
         tp2 = max(natural if natural > 0 else px, px + risk * min_rr)
         reward = tp2 - px
         order_dir = "BUY"
@@ -725,6 +840,7 @@ def _entry_from_range_ladder_geometry(
             )
         runner = tp2 if tp2 > 0 and tp2 < px else (tp1 if 0 < tp1 < px else px - risk * min_rr)
         partial = tp1 if 0 < tp1 < px else runner
+        partial = _finalize_range_tp1(direction, px, invalidation, partial, runner)
         reward = px - runner
         order_dir = "SELL"
     else:
@@ -735,6 +851,7 @@ def _entry_from_range_ladder_geometry(
             )
         runner = tp2 if tp2 > px else (tp1 if tp1 > px else px + risk * min_rr)
         partial = tp1 if tp1 > px else runner
+        partial = _finalize_range_tp1(direction, px, invalidation, partial, runner)
         reward = runner - px
         order_dir = "BUY"
     rr = reward / risk if risk > 0 and reward > 0 else 0.0
@@ -781,14 +898,11 @@ def _entry_thesis(
             sl_anchor = layer_hi
             target = _first_demand_below(levels, px) or _nearest_below(levels, px)
         elif thesis_type == "RESISTANCE_REJECTION":
-            from engine.entry_v3 import _structural_sl_short
+            from engine.entry_v3 import _fade_sl_short
 
-            fallback = max(ref_r * 1.001, px * 1.0002)
-            invalidation = _structural_sl_short(px, ref_r, fallback)
-            # Dar RANGE: SL'i uzak swing high (supply_major) yerine aktif direnç
-            # bandına clamp'le — executed SL de bunu kullansın.
+            invalidation = _fade_sl_short(px, ref_r)
             invalidation = _band_clamp_anchor("SHORT", invalidation, ref_r, ref_s, px, levels)
-            sl_source = "swing_high_15m"
+            sl_source = "fade_level"
             sl_anchor = ref_r
             tp1, tp2 = _range_short_tp_ladder(levels, px, ref_s)
             tp1, tp2 = _range_tp_clamp("SHORT", tp1, tp2, ref_s, ref_r, px)
@@ -841,12 +955,11 @@ def _entry_thesis(
             sl_anchor = layer_lo
             target = _first_supply_above(levels, px) or _nearest_above(levels, px, ref_r)
         elif thesis_type == "SUPPORT_HOLD":
-            from engine.entry_v3 import _structural_sl_long
+            from engine.entry_v3 import _fade_sl_long
 
-            fallback = min(ref_s * 0.999, px * 0.9998)
-            invalidation = _structural_sl_long(px, ref_s, fallback)
+            invalidation = _fade_sl_long(px, ref_s)
             invalidation = _band_clamp_anchor("LONG", invalidation, ref_r, ref_s, px, levels)
-            sl_source = "swing_low_15m"
+            sl_source = "fade_level"
             sl_anchor = ref_s
             tp1, tp2 = _range_long_tp_ladder(levels, px, ref_r)
             tp1, tp2 = _range_tp_clamp("LONG", tp1, tp2, ref_s, ref_r, px)
@@ -1316,6 +1429,28 @@ def build_trade_theses(
                 f"{out['short'].reason}; destek reclaim riski "
                 f"(zone={zone} cvd={cvd_dir or 'NA'} verdict={verdict or 'NA'})"
             )
+        elif _support_break_is_sweep(px, ref_s) and cvd_dir != "BEAR":
+            # Sig kirilim + 15m destek altinda kapanmadi => likidite supurmesi.
+            # Devam-shortu acma; reclaim sonrasi LONG tarafi acilabilsin.
+            out["short"].state = "WEAK"
+            out["short"].entry["valid"] = False
+            out["short"].reason = (
+                f"{out['short'].reason}; sweep suphesi: sig kirilim + 15m "
+                f"destek altinda kapanis yok (cvd={cvd_dir or 'NA'})"
+            )
+        if (
+            getattr(cfg, "V3_BREAKOUT_CVD_GATE", True)
+            and out["short"].entry.get("valid")
+            and cvd_dir == "BULL"
+        ):
+            # Kanal-disi (devam-short) akis kapisi: order-flow ters ise acma.
+            # Veri: kanal-disi karsi-akis trade ort -0.14/trade (en buyuk sizinti).
+            out["short"].state = "WEAK"
+            out["short"].entry["valid"] = False
+            out["short"].reason = (
+                f"{out['short'].reason}; kanal-disi akis kapisi: devam-short "
+                f"CVD ile ters (cvd={cvd_dir})"
+            )
     elif zone == "NEAR_RESISTANCE" and px < ref_r:
         from engine.range_validation_v3 import clean_range_scenario, validate_range_trade
 
@@ -1355,6 +1490,18 @@ def build_trade_theses(
             thesis_type="BROKEN_RESISTANCE",
             reason=f"Fiyat direnc ustunde: px={px:.2f} > R={ref_r:.2f}",
         )
+        if (
+            getattr(cfg, "V3_BREAKOUT_CVD_GATE", True)
+            and out["long"].entry.get("valid")
+            and cvd_dir == "BEAR"
+        ):
+            # Kanal-disi (devam-long) akis kapisi: order-flow ters ise acma.
+            out["long"].state = "WEAK"
+            out["long"].entry["valid"] = False
+            out["long"].reason = (
+                f"{out['long'].reason}; kanal-disi akis kapisi: devam-long "
+                f"CVD ile ters (cvd={cvd_dir})"
+            )
     elif zone == "NEAR_SUPPORT" and px > ref_s:
         from engine.range_validation_v3 import clean_range_scenario, validate_range_trade
 

@@ -257,6 +257,21 @@ async def _maybe_protective_exit() -> bool:
     # %50+runner +1090, tepe-yakalama %30->%46. Gercek-donus kapisi (kar>=esik) yatay-
     # surunmede sahte z=0'da ZARARLA kapatmayi onler: z=0 ama zarar ise BEKLE (SL/maxhold).
     # SL (60bps) borsada; burasi gercek mean-revert'te kapatir.
+    # STRATEJI TM CANLI: trend flip cikis (Pine ile ayni — buffer/flip).
+    if bool(getattr(cfg, "V3_STRATEGY_TM_ENABLED", False)):
+        try:
+            from engine.trend_magic_paper import tm_record_close, tm_trend_flipped
+            from execution.executor import close_position
+
+            if tm_trend_flipped(side):
+                cur_bps = ((entry - mark) if side == "SHORT" else (mark - entry)) / entry * 1e4
+                fee = float(getattr(cfg, "V3_TREND_MAGIC_FEE_BPS", 12.0) or 12.0)
+                log.info(f"[TM-LIVE] flip cikis {side} kar={cur_bps - fee:+.1f}bps")
+                tm_record_close(cur_bps - fee)
+                await close_position(reason="tm_flip")
+                return True
+        except Exception as ex:
+            log.warning(f"[TM-LIVE] cikis: {ex}")
     # STRATEJI D CANLI (oncelikli): POC-donus cikis. Fiyat POC'a doner VE pozisyon karda
     # ise tamamini kapat. Sahte donus (zarar) -> bekle (SL/maxhold). SL 60bps borsada.
     if bool(getattr(cfg, "V3_STRATEGY_D_ENABLED", False)):
@@ -700,6 +715,16 @@ async def on_15m_market(candle: dict) -> None:
     """15m kapandı — seviyeler + rejim bilgisi; break modunda giriş YOK."""
     on_15m_closed(candle)
 
+    if bool(getattr(cfg, "V3_STRATEGY_TM_ENABLED", False)):
+        try:
+            from engine.trend_magic_v3 import is_tf_bar_close_from_15m
+
+            state.tm_bar_close_ok = is_tf_bar_close_from_15m(candle)
+        except Exception:
+            state.tm_bar_close_ok = False
+    else:
+        state.tm_bar_close_ok = False
+
     if state.in_position and state.pos_tp1_hit:
         close_15m = float(candle.get("close", 0) or 0)
         if close_15m > 0:
@@ -746,6 +771,8 @@ async def on_15m_market(candle: dict) -> None:
         if not state.in_position and snap.get("action") in ("LONG", "SHORT"):
             details = dict(snap.get("details") or {})
             if details:
+                if str(details.get("v3_strategy") or "") == "TM" and not state.tm_bar_close_ok:
+                    return
                 await execute_entry(details, source="v3")
         return
 
@@ -866,7 +893,8 @@ async def on_1m_market(candle: dict) -> None:
         act = str(snap.get("action") or "")
         # D (POC) yalniz 15m-kapanis girer (intrabar YOK) -> 1m reclaim yolunu atla.
         d_barclose_only = str((snap.get("details") or {}).get("v3_strategy") or "") == "D"
-        if act in ("LONG", "SHORT") and not d_barclose_only and _reclaim_trigger(act, candle):
+        tm_barclose_only = str((snap.get("details") or {}).get("v3_strategy") or "") == "TM"
+        if act in ("LONG", "SHORT") and not d_barclose_only and not tm_barclose_only and _reclaim_trigger(act, candle):
             details = dict(snap.get("details") or {})
             if details:
                 log.info(

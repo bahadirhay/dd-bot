@@ -855,14 +855,23 @@ def compute_sr_snapshot(
                 chart_lines.append(lv)
 
     close_px = float(bars[-1].get("close", 0) or px)
+    trade_sups = list(raw.get("support") or [])
+    trade_res = list(raw.get("resistance") or [])
+    # Impulse sonrasi kirilmis destek havuzu bos kalir; fiyatin altindaki en yakin
+    # gercek pivotu trade havuzuna ekle (grafik + strateji icin).
+    if px > 0 and not trade_sups and all_levels:
+        below = [lv for lv in all_levels if float(lv.price) < px * 0.9995]
+        if below:
+            nearest = max(below, key=lambda x: float(x.price))
+            trade_sups = [nearest]
     return SRSnapshot(
         timeframe=str(p["timeframe"]),
         price=px,
         close=close_px,
         pine_lines=pine_lines,
         chart_lines=chart_lines,
-        trade_supports=list(raw.get("support") or []),
-        trade_resistances=list(raw.get("resistance") or []),
+        trade_supports=trade_sups,
+        trade_resistances=trade_res,
         active_support=raw.get("active_support"),
         active_resistance=raw.get("active_resistance"),
         all_levels=all_levels,
@@ -928,9 +937,10 @@ def snapshot_chart_level_dicts(
         pk = round(float(sr.price), 2)
         price_counts[pk] = price_counts.get(pk, 0) + 1
 
+    px_chart = float(snap.price or snap.close or 0)
     out: list[dict] = []
     for sr in sorted(lines, key=lambda x: int(getattr(x, "slot", 0) or 0)):
-        d = level_to_dict(sr, tf)
+        d = level_to_dict(sr, tf, current_price=px_chart)
         p = float(d["price"])
         kind = str(d["kind"])
         pk = round(p, 2)

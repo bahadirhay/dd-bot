@@ -203,6 +203,7 @@ app.layout = dbc.Container([
                 id="tf-select",
                 options=[
                     {"label": " 15m", "value": "15m"},
+                    {"label": " 30m", "value": "30m"},
                     {"label": " 1h", "value": "1h"},
                 ],
                 value="15m",
@@ -735,6 +736,135 @@ def _fallback_sr_from_bars(bars, price: float) -> dict:
     }
 
 
+def _add_d_conditions_overlay(fig, row, col, bars, tf_label: str, op=None):
+    """Strateji D (POC + SMA-align) CANLI giris sartlarini gosterir: POC cizgisi, LONG/SHORT
+    esik-bantlari, hizalama SMA'si, mevcut dev/sinyal/blok durumu — + pozisyon/plan cizgileri.
+    Trend Magic KALDIRILDI (bkz memory tm-eliminated-jul2026: her yonden elendi, canlida yok)."""
+    if not bars:
+        return
+    from engine.operation_state import get_operation_view
+
+    px = effective_price()
+    op = op or get_operation_view(px)
+    v3_decision = dict((op.get("v3") or {}).get("decision") or {})
+    action = str(v3_decision.get("action") or "")
+    pos_v3 = bool(state.in_position) and str((state.position_breakout or {}).get("entry_mode") or "") == "v3"
+    show_tp2_chart = bool(getattr(cfg, "SEND_TP2_ORDER", False))
+    line_levels = [px] if px > 0 else []
+
+    def _hline(y, color, dash, label, width=1.5, *, sr_label: bool = False, label_yshift: int = 0):
+        if y <= 0:
+            return
+        fig.add_hline(y=y, line_dash=dash, line_color=color, line_width=width, row=row, col=col)
+        if sr_label and label and bars:
+            fig.add_annotation(
+                x=_bar_dt(float(bars[-1]["ts"])),
+                y=y,
+                text=label,
+                showarrow=False,
+                xanchor="left",
+                xshift=8,
+                yanchor="middle",
+                yshift=label_yshift,
+                font=dict(size=9, color=color),
+                bgcolor="rgba(13,17,23,0.75)",
+                borderpad=2,
+                row=row,
+                col=col,
+            )
+
+    # Strateji D (POC + SMA-align) CANLI sartlari
+    try:
+        from engine.poc_paper import compute_signal as _d_compute_signal
+        d = _d_compute_signal()
+    except Exception:
+        d = {}
+    if d.get("ready"):
+        poc = float(d.get("poc") or 0)
+        if poc > 0:
+            dev_t = float(getattr(cfg, "V3_POC_DEV_BPS", 50) or 50)
+            long_trig = poc * (1 - dev_t / 1e4)
+            short_trig = poc * (1 + dev_t / 1e4)
+            _hline(poc, C["yellow"], "dot", f"D POC {poc:.2f}", width=1.6, sr_label=True)
+            _hline(long_trig, C["green"], "dash", f"D LONG eşik {long_trig:.2f} (dev≤-{dev_t:.0f}bps)",
+                   width=1.2, sr_label=True, label_yshift=-10)
+            _hline(short_trig, C["red"], "dash", f"D SHORT eşik {short_trig:.2f} (dev≥+{dev_t:.0f}bps)",
+                   width=1.2, sr_label=True, label_yshift=10)
+            line_levels += [poc, long_trig, short_trig]
+        if bool(getattr(cfg, "V3_D_SMA_ALIGN", False)):
+            try:
+                from engine.v3_common import bars_15m
+                sma_len = int(getattr(cfg, "V3_D_SMA_ALIGN_LEN", 120) or 120)
+                closes = [float(x.get("close", 0) or 0) for x in bars_15m(sma_len + 5)]
+                closes = [c for c in closes if c > 0]
+                if len(closes) >= sma_len:
+                    sma_v = sum(closes[-sma_len:]) / sma_len
+                    _hline(sma_v, C["blue"], "solid", f"D hizalama SMA{sma_len} {sma_v:.2f}",
+                           width=1.4, sr_label=True, label_yshift=-24)
+                    line_levels.append(sma_v)
+            except Exception:
+                pass
+        dev = d.get("dev")
+        sig = d.get("signal")
+        blocked = d.get("blocked") or ""
+        if dev is not None and bars:
+            status_txt = f"D dev={dev:+.0f}bps  " + (
+                f"SİNYAL={sig}" if sig else (f"BLOK:{blocked}" if blocked else "sinyal yok"))
+            status_col = C["green"] if sig == "LONG" else (C["red"] if sig == "SHORT" else C["muted"])
+            fig.add_annotation(
+                x=_bar_dt(float(bars[-1]["ts"])),
+                y=float(bars[-1]["high"]),
+                text=status_txt,
+                showarrow=False,
+                xanchor="right",
+                yanchor="bottom",
+                yshift=12,
+                font=dict(size=10, color=status_col),
+                bgcolor="rgba(13,17,23,0.85)",
+                borderpad=3,
+                row=row,
+                col=col,
+            )
+
+    # Pozisyon / plan cizgileri
+    if pos_v3:
+        if state.pos_entry > 0:
+            _hline(state.pos_entry, C["purple"], "dashdot", f"Pozisyon Giriş {state.pos_entry:.2f}", width=2.8, sr_label=True, label_yshift=-14)
+            line_levels.append(state.pos_entry)
+        if state.pos_sl > 0:
+            _hline(state.pos_sl, C["orange"], "dash", f"Pozisyon SL {state.pos_sl:.2f}", width=2.2, sr_label=True)
+            line_levels.append(state.pos_sl)
+        if state.pos_tp1 > 0:
+            _hline(state.pos_tp1, C["green"], "dashdot", f"TP1 {state.pos_tp1:.2f}", width=1.8, sr_label=True)
+            line_levels.append(state.pos_tp1)
+        if show_tp2_chart and state.pos_tp2 > 0:
+            _hline(state.pos_tp2, C["green"], "solid", f"TP2 {state.pos_tp2:.2f}", width=1.8)
+            line_levels.append(state.pos_tp2)
+    else:
+        dd = dict(v3_decision.get("details") or {})
+        plan_entry = float(dd.get("price") or 0)
+        plan_sl = float(dd.get("sl") or 0)
+        plan_tp1 = float(dd.get("tp1") or 0)
+        plan_tp2 = float(dd.get("tp2") or 0)
+        if plan_entry > 0 and action in ("LONG", "SHORT"):
+            _hline(plan_entry, C["yellow"], "dash", f"Plan giris {plan_entry:.2f}", width=1.4)
+            line_levels.append(plan_entry)
+        if plan_sl > 0 and action in ("LONG", "SHORT"):
+            _hline(plan_sl, C["orange"], "dash", f"Plan SL {plan_sl:.2f}", width=1.4)
+            line_levels.append(plan_sl)
+        if plan_tp1 > 0 and action in ("LONG", "SHORT"):
+            _hline(plan_tp1, C["green"], "dashdot", f"Plan TP1 {plan_tp1:.2f}", width=1.3)
+            line_levels.append(plan_tp1)
+
+    yr = _y_range_with_levels(bars, *line_levels, px=px)
+    if yr:
+        fig.update_yaxes(range=yr, tickformat=",.2f", row=row, col=col)
+    elif bars:
+        lo, hi = min(b["low"] for b in bars), max(b["high"] for b in bars)
+        pad = max((hi - lo) * 0.04, 2.0)
+        fig.update_yaxes(range=[lo - pad, hi + pad], tickformat=",.2f", row=row, col=col)
+
+
 def _add_breakout_levels(fig, row, col, bars, op=None):
     """
     15m grafik (V3):
@@ -975,6 +1105,7 @@ def update_chart(_, tf):
         logging.getLogger("Dashboard").warning(f"Grafik verisi: {e}")
         pkg = {"bars_15m": [], "bars_1h": [], "bars_1m": [], "series": {}}
     bars_15m = pkg.get("bars_15m") or []
+    bars_30m = pkg.get("bars_30m") or []
     bars_1h = pkg.get("bars_1h") or []
     bars_1m = pkg.get("bars_1m") or []
     ser = pkg.get("series") or {}
@@ -985,15 +1116,17 @@ def update_chart(_, tf):
     v3 = op.get("v3") or {}
     v3_structure = v3.get("structure") or {}
     s1h = str(((v3_structure.get("1h") or {}).get("direction")) or "?")
-    v3_struct_line = f"v3 yapi: 1h={s1h} (bilgi) · 15m/5m kapali"
     src = str(pkg.get("source") or "?")
     last_lbl = ""
     if bars_15m:
         last_lbl = _bar_dt(bars_15m[-1]["ts"]).strftime("%d.%m %H:%M")
 
-    main_bars = bars_1h if tf == "1h" else bars_15m
-    main_lbl = "1h" if tf == "1h" else "15m"
-    main_sec = 3600 if tf == "1h" else 900
+    if tf == "1h":
+        main_bars, main_lbl, main_sec = bars_1h, "1h", 3600
+    elif tf == "30m":
+        main_bars, main_lbl, main_sec = bars_30m or bars_15m, "30m", 1800
+    else:
+        main_bars, main_lbl, main_sec = bars_15m, "15m", 900
 
     fig = make_subplots(
         rows=2, cols=2,
@@ -1010,8 +1143,8 @@ def update_chart(_, tf):
     )
 
     _add_candlestick_trace(fig, main_bars, 1, 1, main_lbl)
-    if tf != "1h":
-        _add_breakout_levels(fig, 1, 1, bars_15m, op=op)
+    if main_bars:
+        _add_d_conditions_overlay(fig, 1, 1, main_bars, main_lbl, op=op)
     lo_m, hi_m = (
         (min(b["low"] for b in main_bars), max(b["high"] for b in main_bars))
         if main_bars

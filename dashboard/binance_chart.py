@@ -14,7 +14,7 @@ from core.config import cfg
 
 log = logging.getLogger("DashChart")
 
-_cache: dict = {"ts": 0.0, "bars_15m": [], "bars_1h": [], "bars_1m": [], "oi": []}
+_cache: dict = {"ts": 0.0, "bars_15m": [], "bars_30m": [], "bars_1h": [], "bars_1m": [], "oi": []}
 CACHE_SEC = 25
 REST_TIMEOUT_SEC = 8
 REST_RETRIES = 3
@@ -99,6 +99,19 @@ def fetch_1m_klines(limit: int = 120) -> list[dict]:
     return fetch_klines("1m", min(limit, 500))
 
 
+def fetch_30m_klines(limit: int = 96) -> list[dict]:
+    return fetch_klines("30m", limit)
+
+
+def _resample_30m_from_15m(bars_15m: list[dict]) -> list[dict]:
+    try:
+        from engine.trend_magic_v3 import resample_bars
+
+        return resample_bars(bars_15m, 1800, 900)
+    except Exception:
+        return []
+
+
 def fetch_oi_hist(limit: int = 96) -> list[dict]:
     try:
         rows = _get(
@@ -143,12 +156,15 @@ def _build_pkg(
     oi: list[dict],
     *,
     source: str,
+    bars_30m: list[dict] | None = None,
 ) -> dict:
     now = time.time()
+    b30 = bars_30m if bars_30m is not None else _resample_30m_from_15m(bars_15m)
     return {
         "ts": now,
         "bars": bars_15m,
         "bars_15m": bars_15m,
+        "bars_30m": b30,
         "bars_1h": bars_1h,
         "bars_1m": bars_1m,
         "oi": oi,
@@ -297,6 +313,7 @@ def get_mtf_package(
     bars_15m: list[dict] = []
     bars_1h: list[dict] = []
     bars_1m: list[dict] = []
+    bars_30m: list[dict] = []
     source = "cache"
 
     publish_bot_bars_to_cache(limit_15m, limit_1h, limit_1m)
@@ -317,6 +334,7 @@ def get_mtf_package(
     if rest_15 and len(rest_15) >= 10:
         bars_15m, bars_1h, bars_1m = rest_15, rest_1h or [], rest_1m or []
         source = "binance_rest"
+        bars_30m = fetch_30m_klines(limit_15m // 2) or _resample_30m_from_15m(bars_15m)
         try:
             from core.state import effective_price
             from engine.intra_15m import get_forming_for_chart
@@ -333,7 +351,13 @@ def get_mtf_package(
         bars_15m = list(_cache.get("bars_15m") or [])
         bars_1h = list(_cache.get("bars_1h") or [])
         bars_1m = list(_cache.get("bars_1m") or [])
+        bars_30m = list(_cache.get("bars_30m") or [])
         source = str(_cache.get("source") or "cache")
+    else:
+        bars_30m = []
+
+    if bars_15m and not bars_30m:
+        bars_30m = _resample_30m_from_15m(bars_15m)
 
     oi: list[dict] = []
     if bars_15m and source.startswith("binance"):
@@ -343,6 +367,6 @@ def get_mtf_package(
             oi = list(_cache.get("oi") or [])
 
     if bars_15m:
-        pkg = _build_pkg(bars_15m, bars_1h, bars_1m, oi, source=source)
+        pkg = _build_pkg(bars_15m, bars_1h, bars_1m, oi, source=source, bars_30m=bars_30m)
         _cache.update(pkg)
     return _cache

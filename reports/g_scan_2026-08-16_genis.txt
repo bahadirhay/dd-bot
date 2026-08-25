@@ -1,0 +1,37 @@
+=== G ADAY KESIF TARAMASI | 2026-08-16 08:17 | 119 likit coin (24h hacim >= $10M, TUM perp'ten dinamik) ===
+  filtreler: permut(1000) + iki-yari + Bonferroni + likidite>=$10M | fee12 W120 hold24
+
+  DOS       veri az/atla
+  GRVT      veri az/atla
+  KORU      veri az/atla
+  SKHY      veri az/atla
+  SNXX      veri az/atla
+  龙虾        veri az/atla
+
+  test edilen: 113 | SAGLAM standardi = CANLI-COIN ile AYNI (ETH/AVAX/INJ boyle bulundu):
+    permut p<0.05 + iki-yari-pozitif + likit>=$10M. Bonferroni (p<0.0004) sadece INFO [B+].
+    Asil out-of-sample kalkan = FORWARD-SHADOW (paper), sert backtest-esigi DEGIL.
+
+=== SAGLAM (canli-coin standardi: permut p<0.05 + iki-yari-poz + likit; B+=Bonferroni de gecer) ===
+  AKE       n=174 net=+227151 isl=+1305.5 p=0.0000 B+ 1y=+34599 2y=+192552 hac=  221M [YENI]
+  BR        n=294 net=+66144 isl=+225.0 p=0.0020    1y=+32175 2y=+33970 hac=   22M [YENI]
+  TAO       n=228 net= +9951 isl=+43.6 p=0.0020    1y=+7763 2y=+2187 hac=   22M [YENI]
+  CL        n=260 net= +8985 isl=+34.6 p=0.0040    1y=+8739 2y= +247 hac=  139M [YENI]
+  AIO       n=375 net=+52287 isl=+139.4 p=0.0050    1y=+11226 2y=+41060 hac=   67M [YENI]
+  BZ        n=227 net= +8040 isl=+35.4 p=0.0080    1y=+8006 2y=  +35 hac=   73M [YENI]
+  INJ       n=114 net=+10387 isl=+91.1 p=0.0110    1y=+8176 2y=+2210 hac=   16M [CANLI]
+  VELVET    n=243 net=+38338 isl=+157.8 p=0.0330    1y=+37824 2y= +514 hac=  133M [YENI]
+  ETH       n=115 net= +3650 isl=+31.7 p=0.0340    1y=+1895 2y=+1756 hac= 1247M [CANLI]
+  RE        n= 83 net=+15611 isl=+188.1 p=0.0390    1y=+1684 2y=+13927 hac=   11M [YENI]
+  ICP       n=117 net= +7297 isl=+62.4 p=0.0430    1y=+4158 2y=+3139 hac=   11M [YENI]
+
+  >>> YENI SAGLAM ADAY (canli/izleme disi) -> funding_shadow'a ekle, forward tut: AKE, BR, TAO, CL, AIO, BZ, VELVET, RE, ICP
+
+=== zayif-gecen (p<0.05 ama iki-yari-tutarsiz VEYA illikit — ALMA, tuzak) ===
+  TUT       n=378 net=+40222 isl=+106.4 p=0.0000 B+ 1y=-12388 2y=+52609 hac=  128M [YENI]
+  SPORTFUN  n=267 net= +9461 isl=+35.4 p=0.0190    1y= -492 2y=+9953 hac=   64M [YENI]
+  AVAX      n=142 net= +6108 isl=+43.0 p=0.0240    1y=-2568 2y=+8677 hac=   77M [CANLI]
+  JCT       n=259 net= +5308 isl=+20.5 p=0.0480    1y=+6087 2y= -780 hac=   17M [YENI]
+
+  NOT: 'YENI SAGLAM' cikarsa -> once funding_shadow'a (paper) ekle, forward tut, sonra kucuk-canli.
+  Hicbir sey cikmamasi NORMAL ve saglikli; sans-seviyesi coklu-testte gizlenir.

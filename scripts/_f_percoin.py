@@ -56,7 +56,7 @@ def maxdd(d):
 # Her coin: N=40 baslangicini gecince kalan bar'i 4 disjoint ceyrege bol; her ceyrekte
 # flip-only vs SL varyantlarini ayri kos (bagimsiz pencere).
 SLS = [0, 300, 500, 700]
-for sym in ('ETH', 'BTC', 'SOL', 'BNB', 'XRP'):
+for sym in ('ETH', 'XLM', 'BNB', 'AAVE', 'DOT', 'LINK'):
     bars = klines(sym)
     if not bars:
         print(sym, 'yok'); continue

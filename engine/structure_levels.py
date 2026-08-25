@@ -178,15 +178,23 @@ def _finalize_breakout_tp1(
     min_rr: float,
 ) -> float:
     """
-    Kırılım TP1: önce min R:R, sonra bps cap — cap R:R'ı bozuyorsa cap uygulanmaz.
-    Geç girişte (fiyat seviyeden uzak) yapısal SL geniş kalır; TP1 swing hedefine açılır.
+    Kırılım TP1: ilk lokal tepki/demand/supply bolgesi.
+    Min R:R hedefi runner/TP2 icindir; TP1 yalnızca cok yakin/isyabetsizse 1R'a acilir.
     """
-    tp1 = _ensure_tp1_min_rr(direction, entry, sl, tp1, min_rr)
     risk = abs(entry - sl)
     if risk <= 0:
         return tp1
+    reward = abs(tp1 - entry)
+    min_local_bps = max(
+        float(getattr(cfg, "BREAK_TP1_LOCAL_MIN_BPS", 60) or 60),
+        float(getattr(cfg, "PROTECTION_TP_MIN_BPS", 8) or 8),
+    )
+    local_far_enough = entry > 0 and (reward / entry * 10000.0) >= min_local_bps
+    if not local_far_enough:
+        tp1 = _ensure_tp1_min_rr(direction, entry, sl, tp1, min_rr)
+        reward = abs(tp1 - entry)
     capped, _ = _apply_tp1_cap(direction, entry, tp1, 0.0, quiet=True)
-    if abs(capped - entry) / risk >= min_rr:
+    if local_far_enough or abs(capped - entry) / risk >= min_rr:
         if capped != tp1:
             log.info(
                 f"TP1 cap uygulandi: {tp1:.2f} -> {capped:.2f} "
@@ -405,6 +413,80 @@ def calc_trade_levels(
     return calc_structure_levels(direction, entry, inv, tp1_tgt, state)
 
 
+def v3_zone_tp_targets(side: str, entry: float) -> tuple[float, float]:
+    """V3 range: kanal icinde TP1 + demand/band runner."""
+    try:
+        from core.state import effective_price, state
+        from engine.levels_v3 import get_levels_snapshot
+        from engine.v3_common import range_channel_tp_ladder
+
+        px = float(effective_price() or entry or 0)
+        snap = get_levels_snapshot(px) if px > 0 else {}
+        s = float(snap.get("active_support") or 0)
+        r = float(snap.get("active_resistance") or 0)
+        tp1, tp2 = range_channel_tp_ladder(
+            side,
+            entry,
+            s,
+            r,
+            levels=snap,
+            swing_lows=state.swing_lows_15m or [],
+            swing_highs=state.swing_highs_15m or [],
+        )
+        if tp1 > 0 and tp2 > 0 and s > 0 and r > s:
+            from engine.trade_thesis_v3 import _finalize_range_tp1, _range_tp_clamp
+
+            side_u = str(side or "").upper()
+            tp1, tp2 = _range_tp_clamp(side_u, tp1, tp2, s, r, entry)
+            sl = float(getattr(state, "pos_sl", 0) or 0)
+            if sl > 0:
+                tp1 = _finalize_range_tp1(side_u, entry, sl, tp1, tp2)
+        return tp1, tp2
+    except Exception:
+        return 0.0, 0.0
+
+
+def _recalc_v3_position_tps(state: Any, pb: dict) -> Tuple[float, float]:
+    """V3 giris — breakout TP1 cap uygulanmaz; katman + kayitli hedef."""
+    side = str(state.pos_side or "").upper()
+    entry = float(state.pos_entry or 0)
+    stored_tp1 = float(pb.get("tp1") or state.pos_tp1 or 0)
+    stored_tp2 = float(pb.get("tp2") or state.pos_tp2 or 0)
+    layer_tp1, layer_tp2 = v3_zone_tp_targets(side, entry)
+
+    from engine.trade_thesis_v3 import tp1_too_close_to_entry
+
+    if side == "SHORT":
+        if (
+            stored_tp1 > 0
+            and stored_tp1 < entry
+            and not tp1_too_close_to_entry("SHORT", entry, stored_tp1)
+        ):
+            tp1 = stored_tp1
+        elif layer_tp1 > 0 and layer_tp1 < entry:
+            tp1 = layer_tp1
+        else:
+            tp1 = layer_tp1 if layer_tp1 > 0 else stored_tp1
+        if stored_tp2 > 0 and stored_tp2 < (tp1 if tp1 > 0 else entry):
+            tp2 = stored_tp2
+        elif layer_tp2 > 0 and layer_tp2 < (tp1 if tp1 > 0 else entry):
+            tp2 = layer_tp2
+        else:
+            tp2 = stored_tp2
+    else:
+        if (
+            stored_tp1 > entry
+            and not tp1_too_close_to_entry("LONG", entry, stored_tp1)
+        ):
+            tp1 = stored_tp1
+        elif layer_tp1 > entry:
+            tp1 = layer_tp1
+        else:
+            tp1 = layer_tp1 if layer_tp1 > entry else stored_tp1
+        tp2 = stored_tp2 if stored_tp2 > tp1 else layer_tp2
+    return round(tp1, 2), round(tp2, 2)
+
+
 def recalc_open_position_tps(state: Any) -> Tuple[float, float]:
     """Açık pozisyon için güncel TP1/TP2 (kırılım kuralları + aktif seviyeler)."""
     if not state.in_position or state.pos_entry <= 0:
@@ -412,6 +494,9 @@ def recalc_open_position_tps(state: Any) -> Tuple[float, float]:
     pb = state.position_breakout or {}
     side = state.pos_side
     entry = float(state.pos_entry)
+
+    if str(pb.get("entry_mode") or pb.get("strategy") or "") == "v3":
+        return _recalc_v3_position_tps(state, pb)
 
     from engine.breakout import get_active_levels
 
@@ -429,11 +514,36 @@ def recalc_open_position_tps(state: Any) -> Tuple[float, float]:
         or 0
     )
     bl = float(pb.get("break_level") or 0)
-    if not bl:
+    if not bl and not pb.get("break_mode"):
         if side == "SHORT":
-            bl = r if r > entry else (s if s > entry else 0.0)
+            # SHORT breakout'ta kirilan seviye eski destek/entry_support'tur;
+            # uzak ana direnci (or. 2006) break_level sanmak TP1'i asiri uzaga iter.
+            above = [
+                float(x or 0)
+                for x in (
+                    pb.get("entry_support"),
+                    pb.get("active_support"),
+                    pb.get("range_support"),
+                    s,
+                    r,
+                )
+                if float(x or 0) > entry
+            ]
+            bl = min(above) if above else 0.0
         else:
-            bl = s if 0 < s < entry else (r if r < entry else 0.0)
+            # LONG breakout'ta kirilan seviye eski direnc/entry_resistance'tir.
+            below = [
+                float(x or 0)
+                for x in (
+                    pb.get("entry_resistance"),
+                    pb.get("active_resistance"),
+                    pb.get("range_resistance"),
+                    r,
+                    s,
+                )
+                if 0 < float(x or 0) < entry
+            ]
+            bl = max(below) if below else 0.0
 
     if pb.get("break_mode") or bl > 0:
         _, _, tp1, tp2 = calc_break_levels(side, entry, bl, s, r, state)

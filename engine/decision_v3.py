@@ -437,9 +437,25 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
     # DUMP-FADE cross-sectional maker paper (shadow): likit coin gunluk <=-12.5% dump -> ertesi gun
     # dibe buy-limit (likidite VER) -> maker +276bps/p=0.000 (taker OLU). Illikidite duvarini maker deldi.
     try:
-        from engine.dumpfade_paper import paper_tick as dumpfade_tick
+        if bool(getattr(cfg, "V3_DUMPFADE_PAPER", True)):
+            from engine.dumpfade_paper import paper_tick as dumpfade_tick
+            dumpfade_tick()
+    except Exception:
+        pass
+    # DUMP-FADE GERCEK EMIR (kucuk boyut, daraltilmis likit evren) — cfg.V3_DUMPFADE_LIVE=False
+    # VARSAYILAN, kapaliyken no-op. bkz engine/dumpfade_live.py + memory dumpfade-liquidity-jul2026.
+    try:
+        from engine.dumpfade_live import live_tick as dumpfade_live_tick
 
-        dumpfade_tick()
+        dumpfade_live_tick()
+    except Exception:
+        pass
+    # STRATEJI G (funding-konumlanma kontraryan) GERCEK EMIR — cfg.V3_G_LIVE=False VARSAYILAN,
+    # kapaliyken no-op. Ilk cagrida bagimsiz thread baslatir (D'yi etkilemez). bkz engine/g_live.py.
+    try:
+        from engine.g_live import live_tick as g_live_tick
+
+        g_live_tick()
     except Exception:
         pass
     # D SAAT-ATRIBUSYON paper (shadow): D sinyallerini UTC-saat + full-exit ile logla -> forward'da
@@ -458,6 +474,25 @@ def update_decision(*, flow_tag: str = "", flow_force: bool = False) -> dict:
         tmom_tick()
     except Exception:
         pass
+    # Trend Magic HA shadow paper (30m gorunum + forward izleme; emir yok).
+    try:
+        from engine.trend_magic_paper import paper_tick as tmagic_tick, publish_shadow_state
+
+        tmagic_tick()
+        publish_shadow_state()
+    except Exception:
+        pass
+    # STRATEJI TM CANLI: yalniz V3_STRATEGY_TM_ENABLED=true iken (D'yi gölgelemez).
+    if bool(getattr(cfg, "V3_STRATEGY_TM_ENABLED", False)):
+        try:
+            from engine.trend_magic_paper import build_live_decision as tm_decision
+
+            tmdec = tm_decision(bar_close_ok=bool(getattr(state, "tm_bar_close_ok", False)))
+            if tmdec is not None:
+                state.v3_decision = tmdec
+                return tmdec
+        except Exception as ex:
+            log.warning(f"[TM-LIVE] karar: {ex}")
     # Strateji F: GUNLUK TSM trend-takip paper (shadow). Walk-forward OOS Sharpe ~1.1 —
     # trend GUNLUK barda calisir (intraday degil). D'ye tamamlayici 2. edge.
     try:

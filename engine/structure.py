@@ -16,8 +16,10 @@ from engine.structure_analyzer import (
 
 log = get_logger("Structure")
 
-_bars_15m: deque = deque(maxlen=200)
-_bars_1h: deque = deque(maxlen=200)
+_BARS_15M_MAX = int(getattr(cfg, "V3_CHART_BACKFILL_15M", 500) or 500)
+_BARS_1H_MAX = int(getattr(cfg, "V3_CHART_BACKFILL_1H", 150) or 150)
+_bars_15m: deque = deque(maxlen=max(_BARS_15M_MAX, 200))
+_bars_1h: deque = deque(maxlen=max(_BARS_1H_MAX, 72))
 
 
 def add_bar_15m(candle: dict):

@@ -30,6 +30,8 @@ _ws_ref: websockets.WebSocketClientProtocol | None = None
 def _request_stream_restart(reason: str) -> None:
     """Keepalive veya WS hata — ana döngü yeniden bağlansın."""
     global _restart_requested, _ws_ref
+    if _restart_requested:
+        return
     _restart_requested = True
     log.warning(f"User stream yeniden başlatma istendi: {reason}")
     ws = _ws_ref
@@ -104,7 +106,11 @@ async def _keepalive_ping(listen_key: str) -> bool:
             ) as r:
                 data = await r.json(content_type=None) if r.content_length else {}
                 if r.status != 200:
-                    log.warning(f"listenKey keepalive HTTP {r.status}: {data}")
+                    code = int((data or {}).get("code", 0) or 0) if isinstance(data, dict) else 0
+                    if r.status == 400 or code == -1125:
+                        log.info(f"listenKey süresi dolmuş/geçersiz — yenilenecek: {data}")
+                    else:
+                        log.warning(f"listenKey keepalive HTTP {r.status}: {data}")
                     return False
                 if isinstance(data, dict) and int(data.get("code", 0) or 0) < 0:
                     log.warning(f"listenKey keepalive API: {data}")
@@ -178,7 +184,7 @@ async def _handle_order_update(msg: dict) -> None:
             from execution.position_lifecycle import async_finalize_position_closed
 
             if otype == "SL":
-                creason = "stop_loss"
+                creason = "runner_sl" if state.pos_tp1_hit else "stop_loss"
             elif otype == "TP":
                 creason = "take_profit"
             elif otype == "MARKET":

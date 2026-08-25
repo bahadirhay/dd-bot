@@ -533,6 +533,92 @@ def dumpfade_seen(symbol: str, day_key: int) -> bool:
         return False
 
 
+def _migrate_dumpfade_live(db: sqlite3.Connection) -> None:
+    """Cross-sectional DUMP-FADE GERCEK-EMIR (dumpfade_live) — kucuk boyut ($10 margin x5), daraltilmis
+    likit-major evren (bkz engine/dumpfade_live.py). dumpfade_paper'in forward-dogrulanmis edge'inin
+    (dumpfade-liquidity-jul2026) ve WF-dogrulanmis -15%% stop'unun (scripts/_dumpfade_stop_wf.py, 4/4
+    pencere pozitif) ilk canli fill-rate/slippage testi. cfg.V3_DUMPFADE_LIVE=False varsayilan."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS dumpfade_live (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            open_ts REAL NOT NULL, open_human TEXT, symbol TEXT,
+            dump_pct REAL, day_open REAL, limit_px REAL, order_id TEXT,
+            entry_px REAL, qty REAL, margin_usd REAL, leverage INTEGER,
+            close_ts REAL, exit_px REAL, pnl_bps REAL, close_reason TEXT,
+            status TEXT DEFAULT 'PENDING', day_key INTEGER
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_dumpfadelive_ts ON dumpfade_live(open_ts DESC)")
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_dumpfadelive_uq ON dumpfade_live(symbol, day_key)")
+
+
+def log_dumpfade_live_pending(symbol: str, day_key: int, dump_pct: float, day_open: float,
+                               limit_px: float, order_id: str) -> int:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            cur = db.execute(
+                "INSERT OR IGNORE INTO dumpfade_live (open_ts,open_human,symbol,dump_pct,day_open,"
+                "limit_px,order_id,status,day_key) VALUES (?,?,?,?,?,?,?, 'PENDING', ?)",
+                (datetime.now().timestamp(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                 str(symbol), float(dump_pct or 0), float(day_open or 0), float(limit_px or 0),
+                 str(order_id), int(day_key)))
+            return int(cur.lastrowid or 0)
+    except Exception:
+        return 0
+
+
+def dumpfade_live_seen(symbol: str, day_key: int) -> bool:
+    try:
+        with _conn() as db:
+            r = db.execute("SELECT 1 FROM dumpfade_live WHERE symbol=? AND day_key=? LIMIT 1",
+                           (str(symbol), int(day_key))).fetchone()
+        return r is not None
+    except Exception:
+        return False
+
+
+def mark_dumpfade_live_filled(rid: int, entry_px: float, qty: float, margin_usd: float, leverage: int) -> None:
+    try:
+        with _conn() as db:
+            db.execute("UPDATE dumpfade_live SET status='OPEN', entry_px=?, qty=?, margin_usd=?, "
+                       "leverage=? WHERE id=?",
+                       (float(entry_px or 0), float(qty or 0), float(margin_usd or 0), int(leverage or 0), int(rid)))
+    except Exception:
+        pass
+
+
+def mark_dumpfade_live_cancelled(rid: int) -> None:
+    try:
+        with _conn() as db:
+            db.execute("UPDATE dumpfade_live SET status='CANCELLED' WHERE id=?", (int(rid),))
+    except Exception:
+        pass
+
+
+def log_dumpfade_live_close(rid: int, exit_px: float, pnl_bps: float, reason: str) -> None:
+    from datetime import datetime
+    try:
+        with _conn() as db:
+            db.execute("UPDATE dumpfade_live SET close_ts=?, exit_px=?, pnl_bps=?, close_reason=?, "
+                       "status='CLOSED' WHERE id=?",
+                       (datetime.now().timestamp(), float(exit_px or 0), float(pnl_bps or 0), str(reason), int(rid)))
+    except Exception:
+        pass
+
+
+def get_open_dumpfade_live() -> list[dict]:
+    """PENDING/OPEN satirlari — restart sonrasi bellek-ici state'i (in-memory _open dict) geri yuklemek icin."""
+    try:
+        with _conn() as db:
+            rows = db.execute(
+                "SELECT id, symbol, day_key, limit_px, order_id, entry_px, qty, margin_usd, leverage, status "
+                "FROM dumpfade_live WHERE status IN ('PENDING','OPEN')").fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
 def _migrate_dexit_paper(db: sqlite3.Connection) -> None:
     """D CIKIS A/B SHADOW (dexit_paper) — gercek emir YOK. Her canli D sinyalinde HEM full-exit
     (mevcut: poc_revert'te %100 kapat) HEM partial (%50 poc_revert + %50 trailing 40bps) sonucunu
@@ -587,36 +673,42 @@ def get_open_dexit(symbol: str) -> dict | None:
 def _migrate_ftsm_paper(db: sqlite3.Connection) -> None:
     """Strateji F: GUNLUK time-series-momentum trend-takip paper (shadow) — gercek emir YOK.
     BUYUK bulgu: trend ETH'de GUNLUK barda calisir (OOS Sharpe ~1.1, +85%). D'ye tamamlayici
-    2. edge (D=intraday range, F=gunluk trend). long-short, haftalarca tutus, -%60 DD. zscore=momentum%."""
+    2. edge (D=intraday range, F=gunluk trend). long-short, haftalarca tutus, -%60 DD. zscore=momentum%.
+    COK-COIN (2026-07-30): ETH/BNB/XLM/LINK — her biri _f_percoin.py + genis-tarama ile ayri
+    dogrulandi (bkz memory f-dd-protection-jul2026 + oturum). symbol kolonu eklendi."""
     db.execute("""
         CREATE TABLE IF NOT EXISTS ftsm_paper (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            open_ts REAL NOT NULL, open_human TEXT, side TEXT, entry REAL, zscore REAL,
+            open_ts REAL NOT NULL, open_human TEXT, symbol TEXT DEFAULT 'ETHUSDT', side TEXT, entry REAL, zscore REAL,
             close_ts REAL, exit REAL, pnl_bps REAL, reason TEXT, status TEXT DEFAULT 'OPEN'
         )
     """)
     db.execute("CREATE INDEX IF NOT EXISTS idx_ftsm_ts ON ftsm_paper(open_ts DESC)")
+    cols = {r[1] for r in db.execute("PRAGMA table_info(ftsm_paper)").fetchall()}
+    if "symbol" not in cols:
+        db.execute("ALTER TABLE ftsm_paper ADD COLUMN symbol TEXT DEFAULT 'ETHUSDT'")
 
 
-def log_ftsm_open(side: str, entry: float, mom: float) -> int:
+def log_ftsm_open(side: str, entry: float, mom: float, symbol: str = "ETHUSDT") -> int:
     from datetime import datetime, timezone
     try:
         with _conn() as db:
             cur = db.execute(
-                "INSERT INTO ftsm_paper (open_ts,open_human,side,entry,zscore,status) VALUES (?,?,?,?,?, 'OPEN')",
+                "INSERT INTO ftsm_paper (open_ts,open_human,symbol,side,entry,zscore,status) VALUES (?,?,?,?,?,?, 'OPEN')",
                 (datetime.now().timestamp(), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-                 str(side), float(entry or 0), float(mom or 0)))
+                 str(symbol), str(side), float(entry or 0), float(mom or 0)))
             return int(cur.lastrowid or 0)
     except Exception:
         return 0
 
 
-def get_open_ftsm() -> dict | None:
-    """Acik (OPEN) ftsm_paper satiri — restart'ta F pozisyonunu geri yuklemek icin."""
+def get_open_ftsm(symbol: str = "ETHUSDT") -> dict | None:
+    """Acik (OPEN) ftsm_paper satiri (sembole gore) — restart'ta F pozisyonunu geri yuklemek icin."""
     try:
         with _conn() as db:
             row = db.execute(
-                "SELECT id, side, entry FROM ftsm_paper WHERE status='OPEN' ORDER BY id DESC LIMIT 1"
+                "SELECT id, side, entry FROM ftsm_paper WHERE status='OPEN' AND symbol=? ORDER BY id DESC LIMIT 1",
+                (str(symbol),)
             ).fetchone()
         if row:
             return {"id": int(row["id"]), "side": str(row["side"]), "entry": float(row["entry"] or 0)}
@@ -712,6 +804,77 @@ def log_tmom_close(rid: int, exit_px: float, pnl_bps: float, reason: str) -> Non
                        (datetime.now().timestamp(), float(exit_px or 0), float(pnl_bps or 0), str(reason), int(rid)))
     except Exception:
         pass
+
+
+def _migrate_tmagic_paper(db: sqlite3.Connection) -> None:
+    """Trend Magic HA shadow paper — gercek emir YOK."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS tmagic_paper (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            open_ts REAL NOT NULL, open_human TEXT, side TEXT, entry REAL,
+            buffer REAL, tf_sec INTEGER, trend_dir INTEGER,
+            close_ts REAL, exit REAL, pnl_bps REAL, reason TEXT, status TEXT DEFAULT 'OPEN'
+        )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_tmagic_ts ON tmagic_paper(open_ts DESC)")
+
+
+def log_tmagic_open(side: str, entry: float, buffer: float, tf_sec: int, trend_dir: int) -> int:
+    from datetime import datetime, timezone
+    try:
+        with _conn() as db:
+            cur = db.execute(
+                "INSERT INTO tmagic_paper (open_ts,open_human,side,entry,buffer,tf_sec,trend_dir,status) "
+                "VALUES (?,?,?,?,?,?,?, 'OPEN')",
+                (
+                    datetime.now().timestamp(),
+                    datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                    str(side),
+                    float(entry or 0),
+                    float(buffer or 0),
+                    int(tf_sec or 0),
+                    int(trend_dir or 0),
+                ),
+            )
+            return int(cur.lastrowid or 0)
+    except Exception:
+        return 0
+
+
+def log_tmagic_close(rid: int, exit_px: float, pnl_bps: float, reason: str, tf_sec: int = 0) -> None:
+    from datetime import datetime
+    try:
+        with _conn() as db:
+            db.execute(
+                "UPDATE tmagic_paper SET close_ts=?, exit=?, pnl_bps=?, reason=?, tf_sec=COALESCE(tf_sec,?), status='CLOSED' WHERE id=?",
+                (datetime.now().timestamp(), float(exit_px or 0), float(pnl_bps or 0), str(reason), int(tf_sec or 0), int(rid)),
+            )
+    except Exception:
+        pass
+
+
+def get_open_tmagic(tf_sec: int = 1800) -> dict | None:
+    """Acik TM shadow pozisyonu (restart sonrasi geri yukleme)."""
+    try:
+        with _conn() as db:
+            row = db.execute(
+                "SELECT id, side, entry, buffer, tf_sec, trend_dir, open_ts FROM tmagic_paper "
+                "WHERE status='OPEN' AND tf_sec=? ORDER BY open_ts DESC LIMIT 1",
+                (int(tf_sec or 0),),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": int(row[0]),
+            "side": str(row[1]),
+            "entry": float(row[2] or 0),
+            "buffer": float(row[3] or 0),
+            "tf_sec": int(row[4] or 0),
+            "trend_dir": int(row[5] or 0),
+            "open_ts": float(row[6] or 0),
+        }
+    except Exception:
+        return None
 
 
 def _migrate_mr5m_paper(db: sqlite3.Connection) -> None:
@@ -1072,6 +1235,7 @@ def init():
         _migrate_poc_paper(db)
         _migrate_d_journal(db)
         _migrate_tmom_paper(db)
+        _migrate_tmagic_paper(db)
         _migrate_ftsm_paper(db)
         _migrate_atr_paper(db)
         _migrate_maker_paper(db)
@@ -1079,13 +1243,14 @@ def init():
         _migrate_funding_paper(db)
         _migrate_dexit_paper(db)
         _migrate_dumpfade_paper(db)
+        _migrate_dumpfade_live(db)
         _migrate_dtime_paper(db)
         # Orphan temizligi: restart hafizadaki paper pozisyonunu sifirlar, DB satiri
         # "OPEN" kalir -> net'i bozar. Startup'ta acik paper kayitlarini ORPHAN isaretle
         # (CLOSED degil -> net hesabina girmez). Gercek para yok, sadece kayit hijyeni.
         # NOT: ftsm_paper (Strateji F) HARIC — gunluk trend, cok-gunluk tutus. Acik satir
         # mesru; restart'ta orphan'lanmaz, paper_tick startup'ta _pos'u geri yukler.
-        for tbl in ("b_paper", "chlong_paper", "statband_paper", "mr5m_paper", "poc_paper", "tmom_paper"):
+        for tbl in ("b_paper", "chlong_paper", "statband_paper", "mr5m_paper", "poc_paper", "tmom_paper", "tmagic_paper"):
             try:
                 db.execute(f"UPDATE {tbl} SET status='ORPHAN' WHERE status='OPEN'")
             except Exception:

@@ -42,12 +42,11 @@ async def v3_update_safe(trigger: str = "1h") -> bool:
             return True  # V3 kapalı, sorun yok
 
         from engine.levels_v3 import update_levels
-        from engine.structure_v3 import update_structure
         from engine.cvd_v3 import update_cvd_snapshot
         from engine.decision_v3 import update_decision
 
+        # levels → market_state (structure→liquidity→events) → decision
         update_levels()
-        update_structure()
         update_cvd_snapshot()
         update_decision()
 

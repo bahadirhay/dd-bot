@@ -7,6 +7,15 @@ from core.async_sleep import stoppable_sleep
 from core.logger import get_logger
 
 log = get_logger("OIFeed")
+_last_warn_ts = 0.0
+
+
+def _warn_throttled(msg: str) -> None:
+    global _last_warn_ts
+    now = time.time()
+    if now - _last_warn_ts >= 60:
+        log.warning(msg)
+        _last_warn_ts = now
 
 async def run():
     log.info("OI+Funding poller başladı")
@@ -19,7 +28,11 @@ async def run():
                     params={"symbol": cfg.SYMBOL},
                     timeout=aiohttp.ClientTimeout(total=5)
                 ) as r:
-                    d = await r.json()
+                    d = await r.json(content_type=None)
+                    if r.status != 200 or not isinstance(d, dict):
+                        _warn_throttled(f"OI gecici HTTP {r.status}: {d}")
+                        await stoppable_sleep(cfg.OI_POLL)
+                        continue
                     oi = float(d.get("openInterest", 0))
                     if oi:
                         state.oi_history.append({"ts": time.time(), "oi": oi})
@@ -38,7 +51,11 @@ async def run():
                     params={"symbol": cfg.SYMBOL},
                     timeout=aiohttp.ClientTimeout(total=5)
                 ) as r:
-                    d = await r.json()
+                    d = await r.json(content_type=None)
+                    if r.status != 200 or not isinstance(d, dict):
+                        _warn_throttled(f"Funding gecici HTTP {r.status}: {d}")
+                        await stoppable_sleep(cfg.OI_POLL)
+                        continue
                     state.funding_rate = float(d.get("lastFundingRate", 0))
                     state.mark_price   = float(d.get("markPrice", state.mark_price))
                     f = state.funding_rate
@@ -47,7 +64,7 @@ async def run():
                     else:             state.funding_signal = "NEUTRAL"
 
             except Exception as e:
-                log.error(f"OI/Funding hata: {e}")
+                _warn_throttled(f"OI/Funding gecici veri hatasi: {e!r}")
 
             if is_stopping():
                 break

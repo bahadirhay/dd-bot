@@ -1,0 +1,347 @@
+// @ Julien_Eche
+
+//@version=5
+indicator('Support Resistance Ultimate', shorttitle='S/R Ultimate', overlay=true)
+
+// === Input Parameters ===
+show_pivot_levels = input.bool(true, title='Show Pivot-Based Levels', tooltip='Enable this option to display support and resistance levels derived from pivot points.\n\nPivot points are calculated using the high, low, and close prices of previous periods and are used to forecast potential turning points in the market.\n\nBy activating this feature, the chart will show lines indicating these key levels, which traders often use to identify potential areas where price might reverse or consolidate.')
+show_volume_levels = input.bool(false, title='Show Volume-Based Levels', tooltip='Enable this option to display support and resistance levels based on volume data, specifically the Point of Control (POC).\n\nThe POC is the price level with the highest traded volume during a specific time period, reflecting a consensus value among market participants.\n\nActivating this feature will display lines on the chart at these levels, highlighting areas where significant trading activity occurred, which can serve as potential resistance or support zones due to the concentration of trading interest.')
+
+// === Default Color Settings ===
+default_support_color = input.color(#22ab94, title='Support', inline='default')
+default_resistance_color = input.color(#f7525f, title='Resistance', inline='default')
+
+num_lines_to_show = input.int(6, title='Number of Lines to Show', minval=1, maxval=12)
+show_touch_count = input.bool(false, "Show touch | volume count", tooltip="Displays the number of touches and volume for each level.\n\nThe indicator works in two steps:\n\n1) It identifies the location of lines using either price-based or volume-based pivot points.\n\n2) It calculates the number of touches and traded volume for each level, determining the line thickness to reflect their importance.")
+lookback_left = input.int(50, title='Bars to the Left', tooltip='Number of past bars used to find pivot points.\nMore bars can help identify longer-term trends.')
+lookback_right = input.int(20, title='Bars to the Right', tooltip='Number of future bars needed to confirm a pivot point.\nThis helps ensure the pivot is significant.')
+quick_lookback = input.int(10, title='Quick Right Bars', tooltip='Fewer bars to the right for faster pivot confirmation.\nUseful for quick trading signals.')
+source_type = input.string('Close', options=['Close', 'High/Low'], title='Source for Pivot Levels')
+
+// === Rolling POC Calculation ===
+lookback1 = input.int(5, title='Lookback Period for Rolling POC', tooltip='This setting is relevant for the "Show Volume-Based Levels" option. It determines the number of bars used to calculate the Rolling Point of Control (POC), which highlights price levels with significant trading activity based on volume. Adjusting this period changes how the POC responds to volume changes over time.', minval=1, maxval=1000)
+
+// === Alternative Color Inputs ===
+use_alternative_colors = input.bool(false, title='Use Alternative Colors', tooltip="Enable to visually differentiate pivot-based and volume-based levels when both are displayed.")
+alternative_pivot_support_color = input.color(#4dc8ad, title='Pivot Support', inline='pivot')
+alternative_pivot_resistance_color = input.color(#FF7377, title='Pivot Resistance', inline='pivot')
+alternative_volume_support_color = input.color(#4682B4, title='Volume Support', inline='volume')
+alternative_volume_resistance_color = input.color(#DC143C, title='Volume Resistance', inline='volume')
+
+// Determine the colors to use for pivot-based lines
+pivot_support_color = use_alternative_colors ? alternative_pivot_support_color : default_support_color
+pivot_resistance_color = use_alternative_colors ? alternative_pivot_resistance_color : default_resistance_color
+
+// Determine the colors to use for volume-based lines
+volume_support_color = use_alternative_colors ? alternative_volume_support_color : default_support_color
+volume_resistance_color = use_alternative_colors ? alternative_volume_resistance_color : default_resistance_color
+
+// === Function to Draw Line ===
+f_draw_level(start, price, color, thickness) =>
+    line.new(x1=start, y1=price, x2=bar_index, y2=price, extend=extend.right, color=color, width=thickness)
+
+// === Function to Calculate Volume Around Level ===
+f_calculate_volume_around_level(level, start_index, range_percentage) =>
+    total_volume = 0.0
+    for i = 0 to bar_index - start_index
+        if math.abs(high[i] - level) / level <= range_percentage or math.abs(low[i] - level) / level <= range_percentage
+            total_volume += volume[i]
+    total_volume
+
+// === Function to Calculate Importance ===
+f_calculate_importance(num_touches, volume_around) =>
+    weight_touches = 0.05
+    weight_volume = 0.25
+    max_volume = ta.highest(volume, lookback_left)
+    score_touches = num_touches * weight_touches
+    score_volume = (volume_around / max_volume) * weight_volume
+    score_importance = score_touches + score_volume
+    math.max(1, math.min(5, math.round(score_importance * 5)))
+
+// === Function to Count Touches ===
+f_count_touches_adjusted(level, start_index) =>
+    touches = 0
+    for i = 0 to bar_index - start_index
+        if (high[i] >= level and low[i] <= level) or (close[i] == level)
+            touches += 1
+    touches
+
+// === Calculate Pivot Points ===
+pivot_support_close = ta.pivotlow(close, lookback_left, lookback_right)
+pivot_support_hl = ta.pivotlow(low, lookback_left, lookback_right)
+pivot_support = source_type == 'Close' ? pivot_support_close : pivot_support_hl
+pivot_resistance_close = ta.pivothigh(close, lookback_left, lookback_right)
+pivot_resistance_hl = ta.pivothigh(high, lookback_left, lookback_right)
+pivot_resistance = source_type == 'Close' ? pivot_resistance_close : pivot_resistance_hl
+
+quick_pivot_support_close = ta.pivotlow(close, lookback_left, quick_lookback)
+quick_pivot_support_hl = ta.pivotlow(low, lookback_left, quick_lookback)
+quick_pivot_support = source_type == 'Close' ? quick_pivot_support_close : quick_pivot_support_hl
+quick_pivot_resistance_close = ta.pivothigh(close, lookback_left, quick_lookback)
+quick_pivot_resistance_hl = ta.pivothigh(high, lookback_left, quick_lookback)
+quick_pivot_resistance = source_type == 'Close' ? quick_pivot_resistance_close : quick_pivot_resistance_hl
+
+// === Determine Levels ===
+level1 = source_type == 'Close' ? ta.valuewhen(not na(quick_pivot_support), close[quick_lookback], 0) : ta.valuewhen(not na(quick_pivot_support), high[quick_lookback], 0)
+level2 = source_type == 'Close' ? ta.valuewhen(not na(quick_pivot_resistance), close[quick_lookback], 0) : ta.valuewhen(not na(quick_pivot_resistance), low[quick_lookback], 0)
+level3 = source_type == 'Close' ? ta.valuewhen(not na(pivot_support), close[lookback_right], 0) : ta.valuewhen(not na(pivot_support), high[lookback_right], 0)
+level4 = source_type == 'Close' ? ta.valuewhen(not na(pivot_resistance), close[lookback_right], 0) : ta.valuewhen(not na(pivot_resistance), low[lookback_right], 0)
+level5 = source_type == 'Close' ? ta.valuewhen(not na(pivot_support), close[lookback_right], 1) : ta.valuewhen(not na(pivot_support), high[lookback_right], 1)
+level6 = source_type == 'Close' ? ta.valuewhen(not na(pivot_resistance), close[lookback_right], 1) : ta.valuewhen(not na(pivot_resistance), low[lookback_right], 1)
+level7 = source_type == 'Close' ? ta.valuewhen(not na(pivot_support), close[lookback_right], 2) : ta.valuewhen(not na(pivot_support), high[lookback_right], 2)
+level8 = source_type == 'Close' ? ta.valuewhen(not na(pivot_resistance), close[lookback_right], 2) : ta.valuewhen(not na(pivot_resistance), low[lookback_right], 2)
+
+// === Increase Thickness if Pivot-Levels Overlap ===
+overlap_increase = 1
+
+// Function to calculate Rolling POC
+f_rolling_poc(lookback) =>
+    highest = ta.highest(lookback)
+    lowest = ta.lowest(lookback)
+    row = 200
+    levels = array.new_float(row + 1)
+    sumv = array.new_float(row)
+    for i = 0 to row by 1
+        array.set(levels, i, lowest + i / row * (highest - lowest))
+    for j = 0 to row - 1 by 1
+        sum = 0.0
+        for k = 0 to lookback - 1 by 1
+            sum := high[k] > array.get(levels, j) and low[k] < array.get(levels, j + 1) ? sum + volume[k] : sum
+        array.set(sumv, j, sum)
+    max_index = array.indexof(sumv, array.max(sumv))
+    Alvl = array.get(levels, max_index)
+    Blvl = array.get(levels, max_index + 1)
+    math.avg(Alvl, Blvl)
+
+// Calculate the Rolling POC
+rolling_poc1 = f_rolling_poc(lookback1)
+
+// === Calculate Pivot Points using Rolling POC ===
+pivot_support_poc = ta.pivothigh(rolling_poc1, lookback_left, lookback_right)
+pivot_resistance_poc = ta.pivotlow(rolling_poc1, lookback_left, lookback_right)
+quick_pivot_support_poc = ta.pivothigh(rolling_poc1, lookback_left, quick_lookback)
+quick_pivot_resistance_poc = ta.pivotlow(rolling_poc1, lookback_left, quick_lookback)
+
+// Determine Levels
+level1_poc = ta.valuewhen(not na(quick_pivot_support_poc), rolling_poc1[quick_lookback], 0)
+level2_poc = ta.valuewhen(not na(quick_pivot_resistance_poc), rolling_poc1[quick_lookback], 0)
+level3_poc = ta.valuewhen(not na(pivot_support_poc), rolling_poc1[lookback_right], 0)
+level4_poc = ta.valuewhen(not na(pivot_resistance_poc), rolling_poc1[lookback_right], 0)
+level5_poc = ta.valuewhen(not na(pivot_support_poc), rolling_poc1[lookback_right], 1)
+level6_poc = ta.valuewhen(not na(pivot_resistance_poc), rolling_poc1[lookback_right], 1)
+level7_poc = ta.valuewhen(not na(pivot_support_poc), rolling_poc1[lookback_right], 2)
+level8_poc = ta.valuewhen(not na(pivot_resistance_poc), rolling_poc1[lookback_right], 2)
+
+// === Determine Start Index for POC ===
+start_index1_poc = ta.valuewhen(not na(quick_pivot_support_poc), bar_index[quick_lookback], 0)
+start_index2_poc = ta.valuewhen(not na(quick_pivot_resistance_poc), bar_index[quick_lookback], 0)
+start_index3_poc = ta.valuewhen(not na(pivot_support_poc), bar_index[lookback_right], 0)
+start_index4_poc = ta.valuewhen(not na(pivot_resistance_poc), bar_index[lookback_right], 0)
+start_index5_poc = ta.valuewhen(not na(pivot_support_poc), bar_index[lookback_right], 1)
+start_index6_poc = ta.valuewhen(not na(pivot_resistance_poc), bar_index[lookback_right], 1)
+start_index7_poc = ta.valuewhen(not na(pivot_support_poc), bar_index[lookback_right], 2)
+start_index8_poc = ta.valuewhen(not na(pivot_resistance_poc), bar_index[lookback_right], 2)
+
+// Count touches and calculate volume for each level
+range_percentage = 0.001 // 0.1% range around the level
+touches1_poc = f_count_touches_adjusted(level1_poc, start_index1_poc)
+volume1_poc = f_calculate_volume_around_level(level1_poc, start_index1_poc, range_percentage)
+touches2_poc = f_count_touches_adjusted(level2_poc, start_index2_poc)
+volume2_poc = f_calculate_volume_around_level(level2_poc, start_index2_poc, range_percentage)
+touches3_poc = f_count_touches_adjusted(level3_poc, start_index3_poc)
+volume3_poc = f_calculate_volume_around_level(level3_poc, start_index3_poc, range_percentage)
+touches4_poc = f_count_touches_adjusted(level4_poc, start_index4_poc)
+volume4_poc = f_calculate_volume_around_level(level4_poc, start_index4_poc, range_percentage)
+touches5_poc = f_count_touches_adjusted(level5_poc, start_index5_poc)
+volume5_poc = f_calculate_volume_around_level(level5_poc, start_index5_poc, range_percentage)
+touches6_poc = f_count_touches_adjusted(level6_poc, start_index6_poc)
+volume6_poc = f_calculate_volume_around_level(level6_poc, start_index6_poc, range_percentage)
+touches7_poc = f_count_touches_adjusted(level7_poc, start_index7_poc)
+volume7_poc = f_calculate_volume_around_level(level7_poc, start_index7_poc, range_percentage)
+touches8_poc = f_count_touches_adjusted(level8_poc, start_index8_poc)
+volume8_poc = f_calculate_volume_around_level(level8_poc, start_index8_poc, range_percentage)
+
+// Calculate thickness for each level
+level_thicknesses_poc = array.new_int(8)
+array.set(level_thicknesses_poc, 0, f_calculate_importance(touches1_poc, volume1_poc))
+array.set(level_thicknesses_poc, 1, f_calculate_importance(touches2_poc, volume2_poc))
+array.set(level_thicknesses_poc, 2, f_calculate_importance(touches3_poc, volume3_poc))
+array.set(level_thicknesses_poc, 3, f_calculate_importance(touches4_poc, volume4_poc))
+array.set(level_thicknesses_poc, 4, f_calculate_importance(touches5_poc, volume5_poc))
+array.set(level_thicknesses_poc, 5, f_calculate_importance(touches6_poc, volume6_poc))
+array.set(level_thicknesses_poc, 6, f_calculate_importance(touches7_poc, volume7_poc))
+array.set(level_thicknesses_poc, 7, f_calculate_importance(touches8_poc, volume8_poc))
+
+// === Increase Thickness if Volume-Based Levels Overlap ===
+if level1_poc == level2_poc or level1_poc == level3_poc or level1_poc == level4_poc or level1_poc == level5_poc or level1_poc == level6_poc or level1_poc == level7_poc or level1_poc == level8_poc
+    array.set(level_thicknesses_poc, 0, array.get(level_thicknesses_poc, 0) + overlap_increase)
+if level2_poc == level3_poc or level2_poc == level4_poc or level2_poc == level5_poc or level2_poc == level6_poc or level2_poc == level7_poc or level2_poc == level8_poc
+    array.set(level_thicknesses_poc, 1, array.get(level_thicknesses_poc, 1) + overlap_increase)
+if level3_poc == level4_poc or level3_poc == level5_poc or level3_poc == level6_poc or level3_poc == level7_poc or level3_poc == level8_poc
+    array.set(level_thicknesses_poc, 2, array.get(level_thicknesses_poc, 2) + overlap_increase)
+if level4_poc == level5_poc or level4_poc == level6_poc or level4_poc == level7_poc or level4_poc == level8_poc
+    array.set(level_thicknesses_poc, 3, array.get(level_thicknesses_poc, 3) + overlap_increase)
+if level5_poc == level6_poc or level5_poc == level7_poc or level5_poc == level8_poc
+    array.set(level_thicknesses_poc, 4, array.get(level_thicknesses_poc, 4) + overlap_increase)
+if level6_poc == level7_poc or level6_poc == level8_poc
+    array.set(level_thicknesses_poc, 5, array.get(level_thicknesses_poc, 5) + overlap_increase)
+if level7_poc == level8_poc
+    array.set(level_thicknesses_poc, 6, array.get(level_thicknesses_poc, 6) + overlap_increase)
+
+// Select Line Color for POC
+level1_poc_color = rolling_poc1 >= level1_poc ? volume_support_color : volume_resistance_color
+level2_poc_color = rolling_poc1 >= level2_poc ? volume_support_color : volume_resistance_color
+level3_poc_color = rolling_poc1 >= level3_poc ? volume_support_color : volume_resistance_color
+level4_poc_color = rolling_poc1 >= level4_poc ? volume_support_color : volume_resistance_color
+level5_poc_color = rolling_poc1 >= level5_poc ? volume_support_color : volume_resistance_color
+level6_poc_color = rolling_poc1 >= level6_poc ? volume_support_color : volume_resistance_color
+level7_poc_color = rolling_poc1 >= level7_poc ? volume_support_color : volume_resistance_color
+level8_poc_color = rolling_poc1 >= level8_poc ? volume_support_color : volume_resistance_color
+
+// Function to format volume
+format_volume(vol) =>
+    vol >= 1e6 ? str.tostring(math.round(vol / 1e6)) + "M" :    vol >= 1e3 ? str.tostring(math.round(vol / 1e3)) + "K" : str.tostring(math.round(vol))
+
+// Draw Volume-Based Levels
+if show_volume_levels
+    if num_lines_to_show >= 1
+        f_draw_level(start_index1_poc, level1_poc, level1_poc_color, array.get(level_thicknesses_poc, 0))
+        if show_touch_count and barstate.islast // Only on last bar
+            label.new(bar_index, level1_poc, text="Touches: " + str.tostring(touches1_poc) + " | Volume: " + format_volume(volume1_poc), color=color.new(level1_poc_color, 20), textcolor=color.black, style=label.style_label_left, size=size.normal)
+    if num_lines_to_show >= 2
+        f_draw_level(start_index2_poc, level2_poc, level2_poc_color, array.get(level_thicknesses_poc, 1))
+        if show_touch_count and barstate.islast // Only on last bar
+            label.new(bar_index, level2_poc, text="Touches: " + str.tostring(touches2_poc) + " | Volume: " + format_volume(volume2_poc), color=color.new(level2_poc_color, 20), textcolor=color.black, style=label.style_label_left, size=size.normal)
+    if num_lines_to_show >= 3
+        f_draw_level(start_index3_poc, level3_poc, level3_poc_color, array.get(level_thicknesses_poc, 2))
+        if show_touch_count and barstate.islast // Only on last bar
+            label.new(bar_index, level3_poc, text="Touches: " + str.tostring(touches3_poc) + " | Volume: " + format_volume(volume3_poc), color=color.new(level3_poc_color, 20), textcolor=color.black, style=label.style_label_left, size=size.normal)
+    if num_lines_to_show >= 4
+        f_draw_level(start_index4_poc, level4_poc, level4_poc_color, array.get(level_thicknesses_poc, 3))
+        if show_touch_count and barstate.islast // Only on last bar
+            label.new(bar_index, level4_poc, text="Touches: " + str.tostring(touches4_poc) + " | Volume: " + format_volume(volume4_poc), color=color.new(level4_poc_color, 20), textcolor=color.black, style=label.style_label_left, size=size.normal)
+    if num_lines_to_show >= 5
+        f_draw_level(start_index5_poc, level5_poc, level5_poc_color, array.get(level_thicknesses_poc, 4))
+        if show_touch_count and barstate.islast // Only on last bar
+            label.new(bar_index ,level5_poc,text="Touches: " + str.tostring(touches5_poc) + " | Volume: " + format_volume(volume5_poc), color=color.new(level5_poc_color ,20),textcolor=color.black ,style=label.style_label_left ,size=size.normal)
+    if num_lines_to_show >= 6
+        f_draw_level(start_index6_poc ,level6_poc ,level6_poc_color ,array.get(level_thicknesses_poc, 5))
+        if show_touch_count and barstate.islast // Only on last bar
+            label.new(bar_index ,level6_poc,text="Touches: " + str.tostring(touches6_poc) + " | Volume: " + format_volume(volume6_poc), color=color.new(level6_poc_color ,20),textcolor=color.black ,style=label.style_label_left ,size=size.normal)
+    if num_lines_to_show >= 7
+        f_draw_level(start_index7_poc ,level7_poc ,level7_poc_color ,array.get(level_thicknesses_poc, 6))
+        if show_touch_count and barstate.islast // Only on last bar
+            label.new(bar_index ,level7_poc,text="Touches: " + str.tostring(touches7_poc) + " | Volume: " + format_volume(volume7_poc), color=color.new(level7_poc_color ,20),textcolor=color.black ,style=label.style_label_left ,size=size.normal)
+    if num_lines_to_show >= 8
+        f_draw_level(start_index8_poc ,level8_poc ,level8_poc_color ,array.get(level_thicknesses_poc, 7))
+        if show_touch_count and barstate.islast // Only on last bar
+            label.new(bar_index ,level8_poc,text="Touches: " + str.tostring(touches8_poc) + " | Volume: " + format_volume(volume8_poc), color=color.new(level8_poc_color ,20),textcolor=color.black ,style=label.style_label_left ,size=size.normal)
+
+// === Select Line Color ===
+level1_color = close >= level1 ? pivot_support_color : pivot_resistance_color
+level2_color = close >= level2 ? pivot_support_color : pivot_resistance_color
+level3_color = close >= level3 ? pivot_support_color : pivot_resistance_color
+level4_color = close >= level4 ? pivot_support_color : pivot_resistance_color
+level5_color = close >= level5 ? pivot_support_color : pivot_resistance_color
+level6_color = close >= level6 ? pivot_support_color : pivot_resistance_color
+level7_color = close >= level7 ? pivot_support_color : pivot_resistance_color
+level8_color = close >= level8 ? pivot_support_color : pivot_resistance_color
+
+// === Determine Start Index ===
+start_index1 = ta.valuewhen(not na(quick_pivot_support), bar_index[quick_lookback], 0)
+start_index2 = ta.valuewhen(not na(quick_pivot_resistance), bar_index[quick_lookback], 0)
+start_index3 = ta.valuewhen(not na(pivot_support), bar_index[lookback_right], 0)
+start_index4 = ta.valuewhen(not na(pivot_resistance), bar_index[lookback_right], 0)
+start_index5 = ta.valuewhen(not na(pivot_support), bar_index[lookback_right], 1)
+start_index6 = ta.valuewhen(not na(pivot_resistance), bar_index[lookback_right], 1)
+start_index7 = ta.valuewhen(not na(pivot_support), bar_index[lookback_right], 2)
+start_index8 = ta.valuewhen(not na(pivot_resistance), bar_index[lookback_right], 2)
+
+// Count touches and calculate volume for each level
+touches1 = f_count_touches_adjusted(level1, start_index1)
+volume1 = f_calculate_volume_around_level(level1, start_index1, range_percentage)
+touches2 = f_count_touches_adjusted(level2, start_index2)
+volume2 = f_calculate_volume_around_level(level2, start_index2, range_percentage)
+touches3 = f_count_touches_adjusted(level3, start_index3)
+volume3 = f_calculate_volume_around_level(level3, start_index3, range_percentage)
+touches4 = f_count_touches_adjusted(level4, start_index4)
+volume4 = f_calculate_volume_around_level(level4, start_index4, range_percentage)
+touches5 = f_count_touches_adjusted(level5, start_index5)
+volume5 = f_calculate_volume_around_level(level5, start_index5, range_percentage)
+touches6 = f_count_touches_adjusted(level6, start_index6)
+volume6 = f_calculate_volume_around_level(level6, start_index6, range_percentage)
+touches7 = f_count_touches_adjusted(level7, start_index7)
+volume7 = f_calculate_volume_around_level(level7, start_index7, range_percentage)
+touches8 = f_count_touches_adjusted(level8, start_index8)
+volume8 = f_calculate_volume_around_level(level8, start_index8, range_percentage)
+
+// Calculate thickness for each level
+level_thicknesses = array.new_int(8)
+array.set(level_thicknesses, 0, f_calculate_importance(touches1, volume1))
+array.set(level_thicknesses, 1, f_calculate_importance(touches2, volume2))
+array.set(level_thicknesses, 2, f_calculate_importance(touches3, volume3))
+array.set(level_thicknesses, 3, f_calculate_importance(touches4, volume4))
+array.set(level_thicknesses, 4, f_calculate_importance(touches5, volume5))
+array.set(level_thicknesses, 5, f_calculate_importance(touches6, volume6))
+array.set(level_thicknesses, 6, f_calculate_importance(touches7, volume7))
+array.set(level_thicknesses, 7, f_calculate_importance(touches8, volume8))
+
+// === Increase Thickness if Pivot-Based Levels Overlap ===
+if level1 == level2 or level1 == level3 or level1 == level4 or level1 == level5 or level1 == level6 or level1 == level7 or level1 == level8
+    array.set(level_thicknesses, 0, array.get(level_thicknesses, 0) + overlap_increase)
+if level2 == level3 or level2 == level4 or level2 == level5 or level2 == level6 or level2 == level7 or level2 == level8
+    array.set(level_thicknesses, 1, array.get(level_thicknesses, 1) + overlap_increase)
+if level3 == level4 or level3 == level5 or level3 == level6 or level3 == level7 or level3 == level8
+    array.set(level_thicknesses, 2, array.get(level_thicknesses, 2) + overlap_increase)
+if level4 == level5 or level4 == level6 or level4 == level7 or level4 == level8
+    array.set(level_thicknesses, 3, array.get(level_thicknesses, 3) + overlap_increase)
+if level5 == level6 or level5 == level7 or level5 == level8
+    array.set(level_thicknesses, 4, array.get(level_thicknesses, 4) + overlap_increase)
+if level6 == level7 or level6 == level8
+    array.set(level_thicknesses, 5, array.get(level_thicknesses, 5) + overlap_increase)
+if level7 == level8
+    array.set(level_thicknesses, 6, array.get(level_thicknesses, 6) + overlap_increase)
+
+// === Draw Pivot-Based Levels ===
+if show_pivot_levels
+    if num_lines_to_show >= 1
+        f_draw_level(start_index1, level1, level1_color, array.get(level_thicknesses, 0))
+        if show_touch_count and barstate.islast // Only on last bar
+            label.new(bar_index, level1, text="Touches: " + str.tostring(touches1) + " | Volume: " + format_volume(volume1), color=color.new(level1_color, 20), textcolor=color.black, style=label.style_label_left, size=size.normal)
+    if num_lines_to_show >= 2
+        f_draw_level(start_index2, level2, level2_color, array.get(level_thicknesses, 1))
+        if show_touch_count and barstate.islast // Only on last bar
+            label.new(bar_index, level2, text="Touches: " + str.tostring(touches2) + " | Volume: " + format_volume(volume2), color=color.new(level2_color, 20), textcolor=color.black, style=label.style_label_left, size=size.normal)
+    if num_lines_to_show >= 3
+        f_draw_level(start_index3, level3, level3_color, array.get(level_thicknesses, 2))
+        if show_touch_count and barstate.islast // Only on last bar
+            label.new(bar_index, level3, text="Touches: " + str.tostring(touches3) + " | Volume: " + format_volume(volume3), color=color.new(level3_color, 20), textcolor=color.black, style=label.style_label_left, size=size.normal)
+    if num_lines_to_show >= 4
+        f_draw_level(start_index4, level4, level4_color, array.get(level_thicknesses, 3))
+        if show_touch_count and barstate.islast // Only on last bar
+            label.new(bar_index, level4, text="Touches: " + str.tostring(touches4) + " | Volume: " + format_volume(volume4), color=color.new(level4_color, 20), textcolor=color.black, style=label.style_label_left, size=size.normal)
+    if num_lines_to_show >= 5
+        f_draw_level(start_index5, level5, level5_color, array.get(level_thicknesses, 4))
+        if show_touch_count and barstate.islast // Only on last bar
+            label.new(bar_index ,level5,text="Touches: " + str.tostring(touches5) + " | Volume: " + format_volume(volume5), color=color.new(level5_color ,20),textcolor=color.black ,style=label.style_label_left ,size=size.normal)
+    if num_lines_to_show >= 6
+        f_draw_level(start_index6, level6, level6_color ,array.get(level_thicknesses ,5))
+        if show_touch_count and barstate.islast // Only on last bar
+            label.new(bar_index, level6,text="Touches: " + str.tostring(touches6) + " | Volume: " + format_volume(volume6), color=color.new(level6_color ,20),textcolor=color.black ,style=label.style_label_left ,size=size.normal)
+    if num_lines_to_show >= 7
+        f_draw_level(start_index7, level7, level7_color ,array.get(level_thicknesses ,6))
+        if show_touch_count and barstate.islast // Only on last bar
+            label.new(bar_index ,level7,text="Touches: " + str.tostring(touches7) + " | Volume: " + format_volume(volume7), color=color.new(level7_color ,20),textcolor=color.black ,style=label.style_label_left ,size=size.normal)
+    if num_lines_to_show >= 8
+        f_draw_level(start_index8_poc ,level8, level8_color, array.get(level_thicknesses ,7))
+        if show_touch_count and barstate.islast // Only on last bar
+            label.new(bar_index ,level8, text="Touches: " + str.tostring(touches8) + " | Volume: " + format_volume(volume8), color=color.new(level8_color ,20),textcolor=color.black ,style=label.style_label_left ,size=size.normal)
+            
+        
+
+// Alert for crossing any support level
+alertcondition(ta.crossover(close, level1) or ta.crossover(close, level3) or ta.crossover(close, level5) or ta.crossover(close, level7) or ta.crossover(close, level1_poc) or ta.crossover(close, level3_poc) or ta.crossover(close, level5_poc) or ta.crossover(close, level7_poc), title='Support Level Crossed', message='A support level has been crossed.')
+
+// Alert for crossing any resistance level
+alertcondition(ta.crossunder(close, level2) or ta.crossunder(close, level4) or ta.crossunder(close, level6) or ta.crossunder(close, level8) or ta.crossunder(close, level2_poc) or ta.crossunder(close, level4_poc) or ta.crossunder(close, level6_poc) or ta.crossunder(close, level8_poc), title='Resistance Level Crossed', message='A resistance level has been crossed.')
+</user_query>

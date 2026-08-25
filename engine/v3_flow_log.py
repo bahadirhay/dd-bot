@@ -119,9 +119,19 @@ def format_v3_flow_block(snap: dict, *, tag: str = "") -> str:
     )
     s_px = float(levels.get("active_support") or 0)
     r_px = float(levels.get("active_resistance") or 0)
+    macro_s_px = float(levels.get("macro_support") or 0)
+    macro_r_px = float(levels.get("macro_resistance") or 0)
     zone = str(levels.get("zone") or "?")
     lock = "kilit" if levels.get("active_locked") else "acik"
     range_ok = "evet" if levels.get("range_valid") else "hayir"
+    band_line = f"px={px:.2f} | band {s_px:.2f}/{r_px:.2f} zone={zone} {lock} range_valid={range_ok}"
+    if (
+        levels.get("trade_band")
+        and macro_s_px > 0
+        and macro_r_px > macro_s_px
+        and (abs(macro_s_px - s_px) > 1.0 or abs(macro_r_px - r_px) > 1.0)
+    ):
+        band_line += f" | macro {macro_s_px:.2f}/{macro_r_px:.2f}"
 
     band_stab = str(scenario.get("band_stability") or "")
     if not band_stab and s_px > 0 and r_px > s_px:
@@ -154,12 +164,58 @@ def format_v3_flow_block(snap: dict, *, tag: str = "") -> str:
     range_sell = _range_side_diag(bars15, levels, "SELL", cvd)
 
     tag_s = f" [{tag}]" if tag else ""
+    story = levels.get("market_story") or getattr(state, "v3_market_story", None) or {}
+    layers = levels.get("zone_layers") or getattr(state, "v3_zone_layers", None) or {}
+    tm = levels.get("trade_map") or getattr(state, "v3_trade_map", None) or {}
+    ms = levels.get("market_state") or getattr(state, "v3_market_state", None) or {}
+    struct_u = ms.get("structure") or story
+    story_line = (
+        f"rejim: {struct_u.get('trend', '?')} guc={struct_u.get('strength', '?')} "
+        f"pattern={struct_u.get('pattern', story.get('pattern', '?'))} — "
+        f"{struct_u.get('summary', story.get('summary', '—'))}"
+        if struct_u
+        else "rejim: —"
+    )
+    ev_flags = (ms.get("events") or {}).get("flags") or {}
+    event_line = (
+        "olaylar: "
+        + " ".join(k for k, v in ev_flags.items() if v)
+        if any(ev_flags.values())
+        else "olaylar: —"
+    )
+    coll = ms.get("collapse") or {}
+    collapse_line = (
+        f"collapse: {coll.get('mode', '?')} ctrl={coll.get('controller', '?')} "
+        f"baskın={coll.get('dominant_bias', '?')} skor={coll.get('state_score', 0)} "
+        f"trade={('evet' if coll.get('allow_trade') else 'hayir')}"
+        f"{' override' if coll.get('override_structure') else ''}"
+        f"{' rej_watch' if coll.get('rejection_watch') else ''}"
+        if coll
+        else "collapse: —"
+    )
+    layer_parts = []
+    for key in ("supply_major", "supply_mid", "demand_weak", "demand_liq"):
+        b = layers.get(key) or {}
+        if b:
+            st = ""
+            if b.get("untouched"):
+                st = " untouched"
+            elif b.get("swept"):
+                st = " swept"
+            elif b.get("tested"):
+                st = " tested"
+            layer_parts.append(f"{key}={b.get('low', 0):.0f}-{b.get('high', 0):.0f}{st}")
+    layer_line = "katmanlar: " + (" | ".join(layer_parts) if layer_parts else "—")
+    map_line = f"trade_map: {' ; '.join(tm.get('ideas') or [])}" if tm.get("ideas") else "trade_map: —"
+
     lines = [
         f"=== V3 AKIS @ {_tr_now()}{tag_s} ===",
-        (
-            f"px={px:.2f} | band {s_px:.2f}/{r_px:.2f} zone={zone} {lock} "
-            f"range_valid={range_ok}"
-        ),
+        band_line,
+        story_line,
+        event_line,
+        collapse_line,
+        layer_line,
+        map_line,
         f"band_stabilite: {band_stab or '—'}",
         f"1h_yapi: {s1h} (bilgi, kapı degil)",
         f"senaryo: {scn} — {scn_detail}",

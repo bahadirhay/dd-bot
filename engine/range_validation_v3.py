@@ -275,11 +275,10 @@ def validate_range_trade(
 
         min_rr = float(getattr(cfg, "V3_MIN_RR_RATIO", 2.0) or 2.0)
         if direction == "LONG":
-            from engine.entry_v3 import _structural_sl_long
+            from engine.entry_v3 import _fade_sl_long
 
-            fallback = min(support * 0.999, px * 0.9998)
-            swing_sl = _structural_sl_long(px, support, fallback)
-            risk = (px - swing_sl) if swing_sl < px else (px - support)
+            fade_sl = _fade_sl_long(px, support)
+            risk = (px - fade_sl) if fade_sl < px else (px - support)
             reward = resistance - px
             if risk > 0 and reward > 0:
                 band_rr = reward / risk
@@ -289,16 +288,15 @@ def validate_range_trade(
                         "rr": round(band_rr, 2),
                         "meets_min_rr": True,
                         "band_target": True,
-                        "structural_sl": True,
+                        "fade_sl": True,
                         "reward_usd": round(reward, 2),
                         "risk_usd": round(risk, 2),
                     }
         elif direction == "SHORT":
-            from engine.entry_v3 import _structural_sl_short
+            from engine.entry_v3 import _fade_sl_short
 
-            fallback = max(resistance * 1.001, px * 1.0002)
-            swing_sl = _structural_sl_short(px, resistance, fallback)
-            risk = (swing_sl - px) if swing_sl > px else (resistance - px)
+            fade_sl = _fade_sl_short(px, resistance)
+            risk = (fade_sl - px) if fade_sl > px else (resistance - px)
             reward = px - support
             if risk > 0 and reward > 0:
                 band_rr = reward / risk
@@ -308,7 +306,7 @@ def validate_range_trade(
                         "rr": round(band_rr, 2),
                         "meets_min_rr": True,
                         "band_target": True,
-                        "structural_sl": True,
+                        "fade_sl": True,
                         "reward_usd": round(reward, 2),
                         "risk_usd": round(risk, 2),
                     }

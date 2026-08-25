@@ -60,6 +60,8 @@ def on_entry_filled(details: dict) -> None:
             "thesis": thesis,
             "tp1": float(details.get("tp1") or 0),
             "tp2": float(details.get("tp2") or 0),
+            "sl_source": str(details.get("sl_source") or ""),
+            "sl_anchor": float(details.get("sl_anchor") or 0),
         }
     )
     state.position_breakout = pb
@@ -69,6 +71,17 @@ def on_entry_filled(details: dict) -> None:
             f"Giris destegi kaydedildi: S={entry_support:.2f} R={entry_resistance:.2f} "
             f"({scenario or trigger or strategy})"
         )
+    entry_tp1 = float(details.get("tp1") or state.pos_tp1 or 0)
+    if entry_tp1 > 0:
+        try:
+            import execution.executor as ex
+            from botlog.db import update_trade_entry_tp1_original
+
+            update_trade_entry_tp1_original(
+                int(getattr(ex, "_trade_id", 0) or 0), entry_tp1
+            )
+        except Exception as e:
+            log.debug(f"Giris TP1 DB yazimi: {e}")
     if thesis:
         log.info(
             f"Tez kaydedildi: {thesis.get('scenario')} key={thesis.get('key_level'):.2f} "

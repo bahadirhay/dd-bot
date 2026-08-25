@@ -1,0 +1,25 @@
+=== G ADAY KESIF TARAMASI | 2026-08-11 18:43 | 71 likit coin ===
+  filtreler: permut(1000) + iki-yari + Bonferroni + likidite>=$20M | fee12 W120 hold24
+
+  MKR       veri az/atla
+
+  test edilen: 70 | Bonferroni esigi p < 0.0007 (0.05/70)
+
+=== SAGLAM (Bonferroni-gecer + iki-yari-poz + likit) ===
+  (yok)
+
+  >>> YENI SAGLAM ADAY (canli/izleme disi): YOK
+
+=== zayif-gecen (ham p<0.05 ama Bonferroni/iki-yari/likidite DUSTU — ALMA, tuzak) ===
+  INJ       n=107 net=+12149 isl=+113.5 p=0.0050 1y=+7713 2y=+4436 hac=   21M [CANLI]
+  ETC       n=177 net= +6600 isl=+37.3 p=0.0050 1y= -211 2y=+6811 hac=   15M [izle]
+  ORDI      n=238 net= +9320 isl=+39.2 p=0.0220 1y=+3666 2y=+5654 hac=    8M [YENI]
+  ETH       n=114 net= +4342 isl=+38.1 p=0.0230 1y=+3048 2y=+1294 hac= 4878M [CANLI]
+  AVAX      n=145 net= +5673 isl=+39.1 p=0.0270 1y= +903 2y=+4770 hac=   73M [CANLI]
+  HBAR      n=116 net= +4688 isl=+40.4 p=0.0320 1y=+2167 2y=+2522 hac=   15M [YENI]
+  SUI       n=121 net= +6830 isl=+56.4 p=0.0330 1y=+7256 2y= -427 hac=   92M [izle]
+  QNT       n=176 net= +4992 isl=+28.4 p=0.0350 1y= +954 2y=+4038 hac=    3M [YENI]
+  RENDER    n=180 net= +5139 isl=+28.5 p=0.0430 1y=+3375 2y=+1764 hac=   17M [YENI]
+
+  NOT: 'YENI SAGLAM' cikarsa -> once funding_shadow'a (paper) ekle, forward tut, sonra kucuk-canli.
+  Hicbir sey cikmamasi NORMAL ve saglikli; sans-seviyesi coklu-testte gizlenir.

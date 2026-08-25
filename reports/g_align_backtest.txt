@@ -1,0 +1,21 @@
+=== COIN-BASI: BASE vs ALIGN (trend-filtreli, N=40) ===
+
+  coin   | BASE n/net/isl        | ALIGN n/net/isl        
+  ETH    | 118    +406  +3.4    |  58    +865 +14.9
+  AVAX   | 142   +3613 +25.4    |  64   +4786 +74.8
+  XRP    | 126   -1330 -10.6    |  54   +1686 +31.2
+  ETC    | 180   +4986 +27.7    |  90   +6383 +70.9
+  LINK   | 140   -3164 -22.6    |  46   +1689 +36.7
+  SUI    | 121   +5177 +42.8    |  48   +7303 +152.1
+  TAO    | 238   +1603  +6.7    | 183   +1546  +8.4
+  HBAR   | 113    +944  +8.4    |  48   +2948 +61.4
+
+=== AGREGAT ===
+  BASE   n=1178 net= +12236 isl=+10.4 win=54% 1y= +7508 2y= +4728 [iki-yari+]
+  ALIGN  n= 591 net= +27204 isl=+46.0 win=59% 1y=+13474 2y=+13730 [iki-yari+]
+
+=== PERMUTASYON (ALIGN net vs BASE'den rastgele n-islem) ===
+  ALIGN gercekten trend-secimi mi, yoksa rastgele n-islem de ayni mi:
+  p = 0.0000  (dusuk=ALIGN'in trend-secimi GERCEK katki)
+
+YORUM: ALIGN net>>BASE + iki-yari+ + p<0.05 -> trend-filtresi GERCEK kazanc.

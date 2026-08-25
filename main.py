@@ -388,6 +388,35 @@ async def _main_loop():
     db_init()
     reload_keys()
 
+    try:
+        from engine.trend_magic_eval import assert_live_gate
+
+        if bool(getattr(cfg, "V3_STRATEGY_TM_ENABLED", False)):
+            assert_live_gate()
+            if is_paper_mode():
+                from pathlib import Path
+                import json as _json
+
+                marker = Path("data/tm_paper_started.json")
+                if not marker.exists():
+                    marker.parent.mkdir(parents=True, exist_ok=True)
+                    marker.write_text(
+                        _json.dumps(
+                            {
+                                "started": time.time(),
+                                "tf_sec": int(getattr(cfg, "V3_TREND_MAGIC_TF_SEC", 1800) or 1800),
+                                "mode": "paper",
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    log.info(
+                        "[TM-PAPER] 30m forward dogrulama basladi — "
+                        "1-2 hafta sonra: python scripts/tm_paper_report.py"
+                    )
+    except Exception:
+        pass
+
     state.exchange_reconciled = False
     state.startup_grace_until = time.time() + 180
 

@@ -1,0 +1,16 @@
+=== G TREND-FILTRE TESTI | 10 coin, 1526 G-islemi ===
+
+  BASE (tum)       n=1526  net=   +250  isl= +0.2  1y=+11710 2y=-11459  [TUTARSIZ]
+  --- ALIGN: sadece gunluk-trendle ayni yon (trende-karsi ATLA) ---
+  ALIGN            n= 747  net= +25318  isl=+33.9  1y=+23432 2y= +1886  [iki-yari+]
+  (atilan: trende-KARSI islemler; bunlar kotu mu?)
+    trende-KARSI   n= 779  net= -25068  isl=-32.2  1y= -8508 2y=-16560  [TUTARSIZ]
+  --- ER filtresi: sadece range'de (dusuk ER) gir ---
+  ER<0.5           n=1509  net=  +2030  isl= +1.3  1y=+12346 2y=-10315  [TUTARSIZ]
+  ER<0.4           n=1466  net=  -3539  isl= -2.4  1y= +7567 2y=-11107  [TUTARSIZ]
+  ER<0.3           n=1323  net=  -2732  isl= -2.1  1y= +7064 2y= -9797  [TUTARSIZ]
+  (atilan: yuksek-ER=trend; onlar kotu mu?)
+    ER>=0.5 (trend) n=17 (az)
+
+YORUM: bir filtre BASE'i geciyorsa -> net UP + iki-yari+ + islem-sayisi makul kalmali.
+Trende-KARSI / yuksek-ER kotuyse -> filtre mantikli. Degilse -> reaktif his, uygulamayiz.

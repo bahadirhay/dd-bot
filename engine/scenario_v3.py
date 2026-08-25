@@ -15,9 +15,9 @@ from engine.levels_v3 import (
     band_is_stable,
     get_breakout_reference_levels,
     get_levels_snapshot,
-    level_trade_ready,
     update_levels,
 )
+from engine.range_validation_v3 import validate_range_trade
 from engine.structure_thresholds import (
     break_threshold_price,
     breakout_close_beyond,
@@ -25,8 +25,11 @@ from engine.structure_thresholds import (
     close_broke_below,
 )
 from engine.v3_common import bars_15m
+from engine.liquidity_map_v3 import check_htf_wall_veto
+from engine.zone_engine_v3 import liquidity_blocks_chase
 
 log = get_logger("ScenarioV3")
+_last_htf_wall_log = ""
 _last_band_stable_log_key = ""
 
 
@@ -102,6 +105,18 @@ def _cvd_bullish_confirmed(zone: str = "") -> bool:
     return False
 
 
+def _htf_wall_blocks(side: str, local_level: float, price: float) -> str:
+    """Bos = izin; dolu = WAIT nedeni."""
+    global _last_htf_wall_log
+    veto, msg = check_htf_wall_veto(side, local_level, price)
+    if not veto:
+        return ""
+    if msg != _last_htf_wall_log:
+        _last_htf_wall_log = msg
+        log.info(f"[SCENARIO] HTF duvar — breakout engellendi: {msg}")
+    return msg
+
+
 def _try_breakout_scenario(
     bars15: list[dict], ref: dict, price: float, *, zone: str = ""
 ) -> dict | None:
@@ -111,6 +126,9 @@ def _try_breakout_scenario(
     last_close = _last_close(bars15)
 
     if ref_s > 0 and _close_below_support(bars15, ref_s) and _cvd_bearish_confirmed(zone):
+        wall = _htf_wall_blocks("SHORT", ref_s, price)
+        if wall:
+            return {"name": "WAIT", "detail": wall}
         thr = break_threshold_price(ref_s, "SHORT", last_close)
         detail = (
             f"Destek kirildi (range_valid yok sayilir): kapanis {last_close:.2f} < "
@@ -129,6 +147,9 @@ def _try_breakout_scenario(
         }
 
     if ref_r > 0 and _close_above_resistance(bars15, ref_r) and _cvd_bullish_confirmed(zone):
+        wall = _htf_wall_blocks("LONG", ref_r, price)
+        if wall:
+            return {"name": "WAIT", "detail": wall}
         thr = break_threshold_price(ref_r, "LONG", last_close)
         detail = (
             f"Direnc kirildi (range_valid yok sayilir): kapanis {last_close:.2f} > "
@@ -203,6 +224,12 @@ def update_scenario() -> dict:
 
     breakout = _detect_breakout(bars15, resistance, support)
     if breakout:
+        local = resistance if breakout == "BUY" else support
+        wall = _htf_wall_blocks(breakout, local, price)
+        if wall:
+            scenario = {"name": "WAIT", "detail": wall}
+            state.v3_scenario = scenario
+            return scenario
         scenario = {
             "name": f"BREAKOUT_{breakout}",
             "detail": f"Kirilim: son kapanis destek/direnc disinda ({breakout}).",
@@ -219,32 +246,57 @@ def update_scenario() -> dict:
     cvd_snap = get_cvd_snapshot() or {}
     last_close = _last_close(bars15)
     if zone == "NEAR_SUPPORT":
-        ready, ready_detail = level_trade_ready(
-            bars15, levels, "BUY", cvd=cvd_snap
+        from engine.market_state_v3 import gate_scenario_with_state
+
+        ok, gate_msg = gate_scenario_with_state("RANGE_BUY", "BUY")
+        if not ok:
+            scenario = {"name": "WAIT", "detail": gate_msg}
+            state.v3_scenario = scenario
+            return scenario
+        from engine.range_validation_v3 import clean_range_scenario
+
+        range_check = validate_range_trade(
+            "LONG",
+            levels=levels,
+            scenario=clean_range_scenario(scenario, "LONG"),
+            cvd=cvd_snap,
+            px=price,
+            bars15=bars15,
         )
+        ready = bool(range_check.get("valid"))
+        ready_detail = str(range_check.get("reason") or "")
         if ready:
             scenario = {
                 "name": "RANGE_BUY",
                 "detail": (
                     f"Destek bolgesi ({support:.2f}) — 4 kosul OK ({ready_detail})."
                 ),
+                "range_validation": range_check,
             }
         elif cvd_dir == "SELL":
             if _close_below_support(bars15, support) and _cvd_bearish_confirmed(zone):
-                thr = break_threshold_price(support, "SHORT", last_close)
-                scenario = {
-                    "name": "BREAKOUT_SELL",
-                    "detail": (
-                        f"Destek kirildi: kapanis {last_close:.2f} < esik {thr:.2f} "
-                        f"(S={support:.2f}), CVD satis."
-                    ),
-                    "ref_support": support,
-                    "ref_resistance": resistance,
-                }
-                log.info(
-                    f"[SCENARIO] BREAKOUT_SELL destek alti kapanis "
-                    f"S={support:.2f} esik={thr:.2f} px={price:.2f} close={last_close:.2f}"
-                )
+                wall = _htf_wall_blocks("SHORT", support, price)
+                if wall:
+                    scenario = {"name": "WAIT", "detail": wall}
+                else:
+                    liq_blk, liq_msg = liquidity_blocks_chase("SHORT", price)
+                    if liq_blk:
+                        scenario = {"name": "WAIT", "detail": liq_msg}
+                    else:
+                        thr = break_threshold_price(support, "SHORT", last_close)
+                        scenario = {
+                            "name": "BREAKOUT_SELL",
+                            "detail": (
+                                f"Destek kirildi: kapanis {last_close:.2f} < esik {thr:.2f} "
+                                f"(S={support:.2f}), CVD satis."
+                            ),
+                            "ref_support": support,
+                            "ref_resistance": resistance,
+                        }
+                        log.info(
+                            f"[SCENARIO] BREAKOUT_SELL destek alti kapanis "
+                            f"S={support:.2f} esik={thr:.2f} px={price:.2f} close={last_close:.2f}"
+                        )
             else:
                 thr = break_threshold_price(support, "SHORT", last_close)
                 scenario = {
@@ -262,32 +314,67 @@ def update_scenario() -> dict:
             if not ready:
                 log.info(f"[SCENARIO] RANGE_BUY engellendi: {ready_detail}")
     elif zone == "NEAR_RESISTANCE":
-        ready, ready_detail = level_trade_ready(
-            bars15, levels, "SELL", cvd=cvd_snap
+        ms = levels.get("market_state") or {}
+        struct_u = ms.get("structure") or {}
+        tm = levels.get("trade_map") or {}
+        if (
+            str(struct_u.get("trend") or "") == "bearish"
+            and tm.get("in_supply_mid")
+            and not levels.get("channel_traversed")
+        ):
+            scenario = {
+                "name": "WAIT",
+                "detail": (
+                    f"Orta direnc bolgesinde ({resistance:.2f}) — short teyit bekle | "
+                    f"{struct_u.get('summary', '')}"
+                ),
+            }
+            state.v3_scenario = scenario
+            return scenario
+        from engine.range_validation_v3 import clean_range_scenario
+
+        range_check = validate_range_trade(
+            "SHORT",
+            levels=levels,
+            scenario=clean_range_scenario(scenario, "SHORT"),
+            cvd=cvd_snap,
+            px=price,
+            bars15=bars15,
         )
+        ready = bool(range_check.get("valid"))
+        ready_detail = str(range_check.get("reason") or "")
         if ready:
             scenario = {
                 "name": "RANGE_SELL",
                 "detail": (
                     f"Direnc bolgesi ({resistance:.2f}) — 4 kosul OK ({ready_detail})."
                 ),
+                "range_validation": range_check,
             }
         elif cvd_dir == "BUY":
             if _close_above_resistance(bars15, resistance) and _cvd_bullish_confirmed(zone):
-                thr = break_threshold_price(resistance, "LONG", last_close)
-                scenario = {
-                    "name": "BREAKOUT_BUY",
-                    "detail": (
-                        f"Direnc kirildi: kapanis {last_close:.2f} > esik {thr:.2f} "
-                        f"(R={resistance:.2f}), CVD alim."
-                    ),
-                    "ref_support": support,
-                    "ref_resistance": resistance,
-                }
-                log.info(
-                    f"[SCENARIO] BREAKOUT_BUY direnc ustu kapanis "
-                    f"R={resistance:.2f} esik={thr:.2f} px={price:.2f} close={last_close:.2f}"
-                )
+                wall = _htf_wall_blocks("LONG", resistance, price)
+                if wall:
+                    scenario = {"name": "WAIT", "detail": wall}
+                else:
+                    liq_blk, liq_msg = liquidity_blocks_chase("LONG", price)
+                    if liq_blk:
+                        scenario = {"name": "WAIT", "detail": liq_msg}
+                    else:
+                        thr = break_threshold_price(resistance, "LONG", last_close)
+                        scenario = {
+                            "name": "BREAKOUT_BUY",
+                            "detail": (
+                                f"Direnc kirildi: kapanis {last_close:.2f} > esik {thr:.2f} "
+                                f"(R={resistance:.2f}), CVD alim."
+                            ),
+                            "ref_support": support,
+                            "ref_resistance": resistance,
+                        }
+                        log.info(
+                            f"[SCENARIO] BREAKOUT_BUY direnc ustu kapanis "
+                            f"R={resistance:.2f} esik={thr:.2f} px={price:.2f} close={last_close:.2f}"
+                        )
             else:
                 thr = break_threshold_price(resistance, "LONG", last_close)
                 scenario = {
@@ -306,6 +393,20 @@ def update_scenario() -> dict:
                 log.info(f"[SCENARIO] RANGE_SELL engellendi: {ready_detail}")
     else:
         scenario = {"name": "WAIT", "detail": "Band ortasi — destek veya dirence yaklasma bekleniyor."}
+
+    story = levels.get("market_story") or getattr(state, "v3_market_story", None) or {}
+    tm = levels.get("trade_map") or getattr(state, "v3_trade_map", None) or {}
+    if scenario.get("name") == "WAIT" and story.get("summary"):
+        extra = str(story.get("summary") or "")
+        if tm.get("in_supply_mid") and str(tm.get("bias")) == "BEAR":
+            extra = (
+                f"Orta direnc {levels.get('mid_supply_low', 0):.0f}-"
+                f"{levels.get('mid_supply_high', 0):.0f} — short teyit bekle | {extra}"
+            )
+        elif tm.get("in_demand_weak") and str(tm.get("bias")) == "BEAR":
+            extra = f"Zayif talep — scalp long yalnizca teyitli | {extra}"
+        if extra and extra not in str(scenario.get("detail") or ""):
+            scenario["detail"] = f"{scenario.get('detail', '')} | Yapi: {extra}".strip(" |")
 
     state.v3_scenario = scenario
     return scenario

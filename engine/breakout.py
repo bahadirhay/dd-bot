@@ -2183,6 +2183,15 @@ def on_entry_filled(details: dict) -> None:
         f"Seviye çevrildi ({direction}): kırılım={break_level:.2f} → "
         f"destek={new_support:.2f} direnç={new_resist:.2f} | yapısal çıkış seviyesi={struct_exit:.2f}"
     )
+    try:
+        from engine.levels_v3 import register_v3_level_flip
+
+        if direction == "LONG":
+            register_v3_level_flip(break_level, "resistance", "support", direction)
+        else:
+            register_v3_level_flip(break_level, "support", "resistance", direction)
+    except Exception:
+        pass
     state.breakout_view = get_status_snapshot(state.price or state.mark_price)
 
 

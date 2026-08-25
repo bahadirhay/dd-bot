@@ -60,6 +60,41 @@ def analyze(hours: int = 6) -> str:
         for reason, cnt in stats["top_no_entry"]:
             lines.append(f"    • {reason}: {cnt} kez")
 
+    try:
+        from engine.good_signal_stats_v3 import get_totals, CATEGORIES
+
+        gs = get_totals()
+        gs_parts = [
+            f"{k}={gs[k]}" for k in CATEGORIES if int(gs.get(k, 0) or 0) > 0
+        ]
+        if gs_parts:
+            lines.append(f"\n  GOOD_SIGNAL_BLOCKED (karar geçti, execute engel):")
+            lines.append(f"    {' | '.join(gs_parts)}")
+    except Exception:
+        pass
+
+    try:
+        from engine.decision_block_stats_v3 import get_totals as decision_totals
+
+        dt = decision_totals()
+        top = sorted(dt.items(), key=lambda x: -x[1])[:8]
+        if top:
+            lines.append(f"\n  DECISION_BLOCK (WAIT — karar katmani, oturum JSON):")
+            lines.append(f"    {' | '.join(f'{k}={v}' for k, v in top)}")
+    except Exception:
+        pass
+
+    try:
+        from botlog.db import reject_reason_stats
+
+        db_rej = reject_reason_stats(hours=24)
+        if db_rej:
+            lines.append(f"\n  REJECT_REASON (son 24h DB, ust 6):")
+            for code, cnt in db_rej[:6]:
+                lines.append(f"    • {code}: {cnt}")
+    except Exception:
+        pass
+
     # ── TRADE PERFORMANSI ─────────────────────────────────────
     lines.append(f"\n💰 Trade Performansı")
     if stats["total_trades"] == 0:

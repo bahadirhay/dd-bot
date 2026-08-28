@@ -64,6 +64,18 @@ foreach ($pn in $panels) {
     }
 }
 
+# 2b) ORDER-FLOW SHADOW toplayici (SUREKLI, detached). Her dakika OBI + taker-akis + mid kaydeder.
+#     Fiyat-DISI mikroyapiyi canli biriktirir (backtest edilemez) -> haftalar sonra WF+permut test.
+if (Test-PyRunning "orderflow_shadow.py") {
+    Write-Host "[2b] Order-flow shadow ZATEN calisiyor -> atlandi"
+} else {
+    Write-Host "[2b] Order-flow shadow baslatiliyor (surekli, her dakika OBI+akis)..."
+    Start-Process $py -ArgumentList "scripts\orderflow_shadow.py" -WindowStyle Hidden `
+        -RedirectStandardOutput "data\logs\orderflow_shadow.log" `
+        -RedirectStandardError "data\logs\orderflow_shadow.err"
+    Start-Sleep -Seconds 2
+}
+
 # 3) DB retention - eski snapshot/event budama (13GB sismesin, her aciliste).
 Write-Host "[3] DB budama (7 gunden eski snapshot/event)..."
 & $py scripts\prune_db.py 7

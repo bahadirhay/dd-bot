@@ -18,7 +18,10 @@ CANDID=["HBARUSDT","RENDERUSDT"]
 # SUPHELI (absurt +139..+1305bps = yeni/volatil coin artefakti, forward'da COKMESI beklenir): AKE/BR/AIO/VELVET/RE.
 # NOT: INJ bu taramada da 'SAGLAM' (p=0.011) cikti AMA canlida kaybetti -> in-sample GUVENILMEZ, forward karar verir.
 CANDID2=["TAOUSDT","CLUSDT","BZUSDT","ICPUSDT","AKEUSDT","BRUSDT","AIOUSDT","VELVETUSDT","REUSDT"]
-COINS=MAIN+SCAN+WATCH+CANDID+CANDID2
+# 08-29 taramasi yeni in-sample-saglam adaylar (forward BEKLIYOR; AKE/BZ zaten forward'da elendi -> EKLENMEDI).
+# TQQQ = tokenize hisse perp'i (tuhaf enstruman, dikkatli). RE zaten CANDID2'de + forward'da pozitifti.
+CANDID3=["MVLLUSDT","BEATUSDT","TSTUSDT","COTIUSDT","TQQQUSDT"]
+COINS=MAIN+SCAN+WATCH+CANDID+CANDID2+CANDID3
 DB=os.path.join(os.path.dirname(__file__),"..","data","funding_shadow.db")
 FEE=6.0; HOLD=24; W=120; PCT=0.15
 FORWARD_TS=dt.datetime(2026,8,5,0,0).timestamp()

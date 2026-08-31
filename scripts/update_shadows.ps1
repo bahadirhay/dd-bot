@@ -13,5 +13,6 @@ $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 "[$ts] shadow update BASLADI" | Out-File -FilePath $log -Append -Encoding utf8
 & $py scripts\d_multicoin_shadow.py  *>> $log
 & $py scripts\funding_shadow.py      *>> $log
+& $py scripts\ftsm_shadow.py         *>> $log
 $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 "[$ts] shadow update BITTI" | Out-File -FilePath $log -Append -Encoding utf8

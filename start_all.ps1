@@ -84,6 +84,7 @@ Write-Host "[3] DB budama (7 gunden eski snapshot/event)..."
 Write-Host "[4] Forward-shadow'lar guncelleniyor (D cok-coin + funding)..."
 & $py scripts\d_multicoin_shadow.py
 & $py scripts\funding_shadow.py
+& $py scripts\ftsm_shadow.py
 
 # 5) Uzak-erisim tuneli (cloudflared quick-tunnel, idempotent). Guncel link -> Masaustu\GBOT_PANEL_LINK.txt
 Write-Host "[5] Uzak-erisim tuneli (cloudflared) - link Masaustu\GBOT_PANEL_LINK.txt'e yazilir..."

@@ -1,0 +1,12 @@
+=== F ADAY KESIF (gunluk TSM N=40, flip-only) | 2026-09-03 14:46 | 185 likit coin (>=$10M) ===
+  saglam = iki-yari-Sharpe>0 + permut p<0.05 + Sharpe>0.5 + likit. Permut: getiri-karistir.
+
+=== SAGLAM (iki-yari+ Sharpe>0.5 permut p<0.05 likit) ===
+  PROM     Sh=+2.32 1y=+2.88 2y=+2.05 p=0.046 flip=18 hac=   83M [YENI]
+  BEAT     Sh=+1.89 1y=+0.37 2y=+3.00 p=0.048 flip=13 hac=   19M [YENI]
+
+  >>> YENI SAGLAM ADAY (basket/canli disi) -> ftsm_shadow'a ekle, forward tut: PROM, BEAT
+
+=== zayif-gecen (p<0.05 ama Sharpe/iki-yari zayif -> tuzak) ===
+
+  NOT: kripto korele + kisa ornek (~1.2yil). YENI cikarsa once ftsm_shadow (paper) forward, sonra karar.

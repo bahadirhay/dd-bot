@@ -23,7 +23,7 @@ CANDID2=["TAOUSDT","CLUSDT","BZUSDT","ICPUSDT","AKEUSDT","BRUSDT","AIOUSDT","VEL
 CANDID3=["MVLLUSDT","BEATUSDT","TSTUSDT","COTIUSDT","TQQQUSDT"]
 COINS=MAIN+SCAN+WATCH+CANDID+CANDID2+CANDID3
 DB=os.path.join(os.path.dirname(__file__),"..","data","funding_shadow.db")
-FEE=6.0; HOLD=24; W=120; PCT=0.15
+FEE=6.0; HOLD=24; W=120; PCT=0.15; TREND_H=12  # TREND_H=canli G'nin 12h-trend filtresi
 FORWARD_TS=dt.datetime(2026,8,5,0,0).timestamp()
 
 def funding(sym,limit=1000):
@@ -48,7 +48,10 @@ def ensure():
     c=sqlite3.connect(DB)
     c.execute("""CREATE TABLE IF NOT EXISTS funding_shadow(
         symbol TEXT, ts INTEGER, human TEXT, funding REAL, side INTEGER, entry REAL,
-        exit_ts INTEGER, exit REAL, pnl_bps REAL, status TEXT, PRIMARY KEY(symbol,ts))""")
+        exit_ts INTEGER, exit REAL, pnl_bps REAL, status TEXT, trend INTEGER, PRIMARY KEY(symbol,ts))""")
+    # eski DB'de trend sutunu yoksa ekle (idempotent)
+    if "trend" not in [r[1] for r in c.execute("PRAGMA table_info(funding_shadow)")]:
+        c.execute("ALTER TABLE funding_shadow ADD COLUMN trend INTEGER")
     c.commit(); return c
 
 def signals(sym):
@@ -62,29 +65,35 @@ def signals(sym):
         if not side: continue
         p0=pat(kd,ks,ts)
         if not p0 or p0<=0: continue
+        pref=pat(kd,ks,ts-TREND_H*3600)          # 12h once (canli G trend filtresi)
+        trend=(1 if p0>pref else -1) if pref else 0
         ext=ts+HOLD*3600
         if now>=ext:
             p1=pat(kd,ks,ext)
             if not p1: continue
             pnl=side*(p1-p0)/p0*1e4-FEE
-            out.append((ts,rate,side,p0,ext,p1,round(pnl,1),"CLOSED"))
+            out.append((ts,rate,side,p0,ext,p1,round(pnl,1),"CLOSED",trend))
         else:
-            out.append((ts,rate,side,p0,None,None,None,"OPEN"))
+            out.append((ts,rate,side,p0,None,None,None,"OPEN",trend))
     return out
 
 if __name__=="__main__":
     c=ensure()
     print("=== FUNDING-kontraryan forward-shadow | %s ==="%dt.datetime.now().strftime("%Y-%m-%d %H:%M"))
     print("forward: %s | ana=ETH/AVAX (p<0.05), izleme=XRP/LINK | DB: data/funding_shadow.db\n"%dt.datetime.fromtimestamp(FORWARD_TS).strftime("%Y-%m-%d"))
+    print("  RAW=ham funding-contrarian | FILT=12h-trend-hizali (CANLI G ile birebir)\n")
     for sym in COINS:
-        for (ts,rate,side,p0,ext,p1,pnl,st) in signals(sym):
-            c.execute("INSERT OR REPLACE INTO funding_shadow VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (sym,ts,dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M"),rate,side,round(p0,4),ext,round(p1,4) if p1 else None,pnl,st))
+        for (ts,rate,side,p0,ext,p1,pnl,st,trend) in signals(sym):
+            c.execute("INSERT OR REPLACE INTO funding_shadow VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (sym,ts,dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M"),rate,side,round(p0,4),ext,round(p1,4) if p1 else None,pnl,st,trend))
         c.commit()
-        allr=c.execute("SELECT pnl_bps,ts FROM funding_shadow WHERE symbol=? AND status='CLOSED'",(sym,)).fetchall()
-        fwd=[r[0] for r in allr if r[1]>=FORWARD_TS]; tot=[r[0] for r in allr]
+        allr=c.execute("SELECT pnl_bps,ts,side,trend FROM funding_shadow WHERE symbol=? AND status='CLOSED'",(sym,)).fetchall()
         def s(v): return (len(v),sum(v),100*sum(1 for x in v if x>0)//len(v) if v else 0)
-        nt,nett,wt=s(tot); nf,netf,wf=s(fwd)
+        # RAW = tum; FILT = side==trend (canli G filtresi)
+        raw=[r[0] for r in allr]; filt=[r[0] for r in allr if r[3] and r[2]==r[3]]
+        raw_f=[r[0] for r in allr if r[1]>=FORWARD_TS]; filt_f=[r[0] for r in allr if r[1]>=FORWARD_TS and r[3] and r[2]==r[3]]
+        nr,netr,_=s(raw); nfi,netfi,_=s(filt); _,rawff,_=s(raw_f); _,filtff,_=s(filt_f)
         tag="ANA" if sym in MAIN else ("tarama" if sym in SCAN else "izle")
-        print("  %-8s[%s] TUM: %d isl net%+.0f win%d%% | FORWARD(>=08-05): %d isl net%+.0f"%(sym.replace("USDT",""),tag,nt,nett,wt,nf,netf))
-    print("\nHaftalik calistir -> FORWARD buyur. ETH/AVAX forward-pozitif kalirsa kucuk-canli adayi.")
+        print("  %-8s[%s] RAW:%3d n%+7.0f  FILT:%3d n%+7.0f | FWD-RAW%+6.0f FWD-FILT%+6.0f"%(
+            sym.replace("USDT",""),tag,nr,netr,nfi,netfi,rawff,filtff))
+    print("\nFILT = canli G'nin gordugu. Aday karari FILT-forward'a gore verilir (RAW yaniltir).")

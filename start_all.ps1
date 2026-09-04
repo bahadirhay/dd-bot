@@ -76,6 +76,17 @@ if (Test-PyRunning "orderflow_shadow.py") {
     Start-Sleep -Seconds 2
 }
 
+# 2c) G ERKEN-GIRIS shadow (SUREKLI, detached). Premium-index uca ulasinca erken paper-giris (settled beklemeden).
+if (Test-PyRunning "g_early_shadow.py") {
+    Write-Host "[2c] G-early shadow ZATEN calisiyor -> atlandi"
+} else {
+    Write-Host "[2c] G-early shadow baslatiliyor (premium-cross erken-giris)..."
+    Start-Process $py -ArgumentList "scripts\g_early_shadow.py" -WindowStyle Hidden `
+        -RedirectStandardOutput "data\logs\g_early_shadow.log" `
+        -RedirectStandardError "data\logs\g_early_shadow.err"
+    Start-Sleep -Seconds 2
+}
+
 # 3) DB retention - eski snapshot/event budama (13GB sismesin, her aciliste).
 Write-Host "[3] DB budama (7 gunden eski snapshot/event)..."
 & $py scripts\prune_db.py 7

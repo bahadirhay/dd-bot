@@ -24,6 +24,10 @@ DB = os.path.join(_DATADIR, "ftsm_shadow.db")
 N = 40            # gunluk geri-bakis (dogrulanmis optimum)
 FEE_BPS = 6.0     # flip basina ~6 bps (2 bacak)
 FWD = time.mktime(time.strptime("2026-08-31", "%Y-%m-%d"))  # bu tarih sonrasi = gercek forward
+# GERCEKCI CANLI KURALI: F FLAT baslar, orta-trende girmez, ILK FLIP'i bekler (gec-giris riski YOK).
+# Sadece open>=DEPLOY olan (deploy sonrasi TAZE flip) islemler gercekci-canli sayilir; deploy aninda
+# devam eden trend (open<DEPLOY) MIRAS pozisyon -> canlida ACILMAZ (atlanir). Backtest: orta-giris -221bps.
+DEPLOY = time.mktime(time.strptime("2026-09-06", "%Y-%m-%d"))
 
 # F canli-aday seti (G ile AYRIK) + ETH referans (G'de canli, burada sadece kiyas)
 LIVE = ["BNBUSDT", "LINKUSDT", "ADAUSDT", "LTCUSDT", "INJUSDT"]
@@ -78,7 +82,7 @@ def main():
     print("  canli-aday (G-AYRIK): %s | referans: %s" % (",".join(x.replace("USDT", "") for x in LIVE),
                                                           ",".join(x.replace("USDT", "") for x in REF)))
     print()
-    print("  %-5s %-4s %18s   %18s" % ("coin", "", "TUM (net bps)", "FORWARD >=08-31"))
+    print("  %-5s %-4s %14s  %14s  %s" % ("coin", "", "TUM(net)", "GERCEKCI*", "deploy-ani poz"))
     for sym in COINS:
         tr = trades(sym)
         for (ots, side, ent, cts, ex, pnl, st) in tr:
@@ -87,17 +91,23 @@ def main():
                        side, round(ent, 5), cts, round(ex, 5) if ex else None, pnl, st))
         closed = [t for t in tr if t[6] == "CLOSED"]
         allnet = sum(t[5] for t in closed)
-        fwd = [t for t in closed if t[3] and t[3] > FWD]
-        fnet = sum(t[5] for t in fwd)
+        # GERCEKCI: sadece deploy sonrasi ACILAN (taze flip) islemler -- orta-trend mirasi ATLANIR
+        real = [t for t in closed if t[0] >= DEPLOY]
+        rnet = sum(t[5] for t in real)
         opos = [t for t in tr if t[6] == "OPEN"]
-        opd = ("acik:%s" % ("LONG" if opos[0][1] == 1 else "SHORT")) if opos else "-"
+        if opos:
+            inh = "MIRAS-ATLA" if opos[0][0] < DEPLOY else "taze"
+            opd = "acik:%s (%s)" % ("LONG" if opos[0][1] == 1 else "SHORT", inh)
+        else:
+            opd = "-"
         tag = "REF" if sym in REF else "aday"
-        print("  %-5s [%s] n=%2d net=%+7.0f   n=%2d net=%+6.0f   %s"
-              % (sym.replace("USDT", ""), tag, len(closed), allnet, len(fwd), fnet, opd))
+        print("  %-5s [%s] n=%2d %+7.0f   n=%2d %+7.0f   %s"
+              % (sym.replace("USDT", ""), tag, len(closed), allnet, len(real), rnet, opd))
     c.commit()
     print()
-    print("  NOT: FORWARD sutunu 08-31 sonrasi = gercek OOS (henuz ~bos, bugun basladi). Haftalarca biriktir.")
-    print("  ETH=REF (G'de canli, F'de degil). Aday set G ile AYRIK -> tek hesapta yan yana calisir.")
+    print("  * GERCEKCI = FLAT-basla + deploy(09-06) sonrasi ILK FLIP'ten gir (gec-giris YOK). Henuz ~bos.")
+    print("  deploy-aninda devam eden trend = MIRAS-ATLA (canlida acilmaz). Haftalarca taze-flip biriktir.")
+    print("  ETH=REF (G'de canli degil). Aday set G ile AYRIK -> tek hesapta netlesme yok.")
 
 
 if __name__ == "__main__":

@@ -47,6 +47,14 @@ TREND_HOURS = 12  # TREND-ALIGN: trend lookback (SAAT, hourly bar). Contrarian g
                   # Kisa-N=daha cok momentum/whipsaw ama backtest net-pozitif. Permut p=0.0000.
 LOCK_PORT = 57602
 
+# 2026-09-07 KULLANICI KARARI (canli, gercek-para): G-yon TERS + FILTRE KAPALI.
+# Gerekce: gercek 78 islem G-contrarian -%31 kaybetti; ayni islemler TERS +%28 olurdu; G rejim-koru zaten
+# (boga/ayi bilemez). Filtresiz+ters son-veride +60bps/isl (en iyi varyant). YAPISAL RISK: ters=momentum
+# ayida/donuste patlar (contrarian bogada patladi gibi) -> boyut KUCUK (margin/kaldirac degismez, risk sinirli).
+# Geri almak icin: REVERSE_MODE=False + USE_FILTER=True.
+REVERSE_MODE = True    # True: funding sinyalinin TERSI (momentum, kalabalikla). False: klasik contrarian.
+USE_FILTER = False     # False: 12h-trend filtresi KAPALI (her taze funding-uc sinyalinde ac).
+
 _open: dict = {}          # symbol -> pozisyon kaydi
 _lock = threading.Lock()
 _thread_started = False
@@ -302,14 +310,19 @@ def _tick():
             _last_funding_done[sym] = ftime
             continue
         _last_funding_done[sym] = ftime
-        # TREND-ALIGN FILTRESI (12h hourly): contrarian yon trendle AYNI degilse ATLA.
-        # Backtest: trende-karsi kaybeden; 12h-uyumlu +38bps/isl (per-coin 7/8+, permut p=0.0000, iki-yari+).
-        trend = _daily_trend(sym)
-        if trend != 0 and side != trend:
-            log.info(f"[G-LIVE] {sym} TREND-ALIGN atla: {'LONG' if side==1 else 'SHORT'} sinyali "
-                     f"gunluk-trend {'UP' if trend==1 else 'DOWN'} ile TERS (trende-karsi=backtest kaybeden)")
-            continue
-        _enter(sym, side, funding, ftime)
+        # TREND-ALIGN FILTRESI (12h hourly) — sadece USE_FILTER=True iken. Kullanici karariyla KAPALI.
+        if USE_FILTER:
+            trend = _daily_trend(sym)
+            if trend != 0 and side != trend:
+                log.info(f"[G-LIVE] {sym} TREND-ALIGN atla: {'LONG' if side==1 else 'SHORT'} sinyali "
+                         f"gunluk-trend {'UP' if trend==1 else 'DOWN'} ile TERS")
+                continue
+        # YON: REVERSE_MODE iken funding sinyalinin TERSI acilir (momentum, kalabalikla).
+        eff_side = -side if REVERSE_MODE else side
+        if REVERSE_MODE:
+            log.info(f"[G-LIVE] {sym} TERS-MOD: funding {'yuksek' if side==-1 else 'dusuk'} "
+                     f"-> normalde {'SHORT' if side==-1 else 'LONG'}, biz {'LONG' if eff_side==1 else 'SHORT'} aciyoruz")
+        _enter(sym, eff_side, funding, ftime)
 
 
 def _run_forever():

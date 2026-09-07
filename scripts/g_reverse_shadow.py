@@ -75,8 +75,9 @@ def process(c, verbose=False):
             if not p0 or not ptr or p0 <= 0:
                 continue
             trend = 1 if p0 > ptr else -1
-            if g_side != trend:              # 12h-filtre: G bu sinyali ALMAZ -> biz de almayiz
-                continue
+            # KULLANICI ONERISI: FILTRE KALDIRILDI -> her taze funding-uc sinyalini al (daha cok/erken poz),
+            # ve TERS ac. (Onceki: 12h-filtre vardi.) Boga son-veride HAM-TERS +60/isl idi; yapisal risk: ayida patlar.
+            # if g_side != trend: continue   # <- filtre KAPALI (kullanici: filtresiz + ters gercekci)
             if c.execute("SELECT 1 FROM g_reverse WHERE symbol=? AND ftime=?", (s, ts)).fetchone():
                 continue
             rev_side = -g_side               # TERS pozisyon

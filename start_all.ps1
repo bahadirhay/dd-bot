@@ -87,6 +87,17 @@ if (Test-PyRunning "g_early_shadow.py") {
     Start-Sleep -Seconds 2
 }
 
+# 2d) G-TERS shadow (SUREKLI, detached). Kullanici hipotezi: G-sinyalinin TERSI daha mi iyi (forward kiyas).
+if (Test-PyRunning "g_reverse_shadow.py") {
+    Write-Host "[2d] G-reverse shadow ZATEN calisiyor -> atlandi"
+} else {
+    Write-Host "[2d] G-reverse shadow baslatiliyor (G-sinyalinin tersi, forward test)..."
+    Start-Process $py -ArgumentList "scripts\g_reverse_shadow.py" -WindowStyle Hidden `
+        -RedirectStandardOutput "data\logs\g_reverse_shadow.log" `
+        -RedirectStandardError "data\logs\g_reverse_shadow.err"
+    Start-Sleep -Seconds 2
+}
+
 # 3) DB retention - eski snapshot/event budama (13GB sismesin, her aciliste).
 Write-Host "[3] DB budama (7 gunden eski snapshot/event)..."
 & $py scripts\prune_db.py 7

@@ -25,6 +25,9 @@ DUMP_PCT = 12.5           # gunluk <=-bu% -> dump
 DUMP_CAP = 30.0           # <=-bu% ise ATLA (rug/delist, fade degil — ilk canli tarama LAB-78%% yakaladi)
 OFFSET_BPS = 300.0        # ertesi gun open'in bu kadar bps ALTINA buy-limit (likidite ver)
 MAKER_FEE = 10.0          # giris+cikis maker (~5+5 bps)
+STOP_BPS = 300.0          # GUARDRAIL (09-12): fill'den bu kadar bps ASAGI inerse STOP (kuyruk-koruma).
+                          # Kuyruk (dump-devam) net'i -14251 yapiyordu; -300 tavan -> +28064 (ama iki-yari
+                          # tutarsiz, 1y-negatif = rejim-bagimli). Guardrail'li forward-tutarlilik test edilecek.
 MIN_QVOL = 25e6          # KALICI likidite: 30-gun ORT quote-vol >= $25M. 5M COK DUSUKTU -> canli forward'da
                           # small-cap gurultusu + IDEALIZE-fill sahte-kazanci sokuyordu (EVAA -26%%->+2943 SAHTE,
                           # XPIN/CLO gercek falling-knife -456). 25M: illikit-fake elenir, dolum GERCEKCI,
@@ -114,7 +117,16 @@ def _run_scan() -> None:
                 continue
             lim = o1 * (1 - OFFSET_BPS / 1e4)
             filled = l1 <= lim
-            pnl = ((c1 - lim) / lim * 1e4 - MAKER_FEE) if filled else 0.0
+            # GUARDRAIL: fill@lim sonrasi gun-ici STOP_BPS altina inerse orada dur (kuyruk-koruma);
+            # yoksa gun-close'da cik. Gunluk-bar yaklasimi: low stop'u deldiyse stop'ta cikildi say.
+            if filled:
+                stop_px = lim * (1 - STOP_BPS / 1e4)
+                if l1 <= stop_px:
+                    pnl = -STOP_BPS - MAKER_FEE
+                else:
+                    pnl = (c1 - lim) / lim * 1e4 - MAKER_FEE
+            else:
+                pnl = 0.0
             log_dumpfade(sym, dkey, dump, o1, lim, l1, c1, filled, pnl)
             logged += 1
             if filled:

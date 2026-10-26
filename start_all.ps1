@@ -43,14 +43,10 @@ if ((Test-PyRunning "main.py") -or (Test-SupRunning)) {
 }
 
 # 2) Ayri panel surecleri (bot disinda, hepsi read-only/ayri port). Liste -> yeni panel ekle.
-$panels = @(
-    @{ name="Grid cok-coin"; script="dashboard\multichart.py";          port=8055; log="multichart" },
-    @{ name="DumpFade";      script="dashboard\dumpfade_live_panel.py";  port=8056; log="dumpfade_panel" },
-    @{ name="Strateji F";    script="dashboard\ftsm_live_panel.py";      port=8057; log="ftsm_panel" },
-    @{ name="Rejim izleme";  script="dashboard\regime_panel.py";         port=8058; log="regime_panel" },
-    @{ name="Strateji G (shadow)"; script="dashboard\funding_panel.py";   port=8059; log="funding_panel" },
-    @{ name="Strateji G (CANLI)";  script="dashboard\g_live_panel.py";    port=8060; log="g_live_panel" }
-)
+# BELLEK-KORUMA (2026-09-30): panolar OTOMATIK ACILMAZ. Makine 3.9GB RAM -> panolar bellek+CPU yiyip
+# kilitlenmeye katkida bulunuyordu (kullanilmayan strateji goruntuleyicileri: G/dumpfade/F kapali).
+# Bir panoyu GORMEK icin elle ac: python dashboard\<panel>.py. Ana veri (8050) main.py icinde, hep acik.
+$panels = @()   # otomatik pano YOK (bellek icin). Ihtiyac halinde elle baslat.
 foreach ($pn in $panels) {
     $base = Split-Path $pn.script -Leaf
     if (Test-PyRunning $base) {
@@ -76,25 +72,53 @@ if (Test-PyRunning "orderflow_shadow.py") {
     Start-Sleep -Seconds 2
 }
 
-# 2c) G ERKEN-GIRIS shadow (SUREKLI, detached). Premium-index uca ulasinca erken paper-giris (settled beklemeden).
-if (Test-PyRunning "g_early_shadow.py") {
-    Write-Host "[2c] G-early shadow ZATEN calisiyor -> atlandi"
+# 2c) G ERKEN-GIRIS shadow -- DURDURULDU 2026-09-15 (rejim donusunde yanlislandi, pump-tepesinde LONG).
+#     Reboot'ta GERI GELMESIN diye kapatildi. Tekrar acmak icin bu blogu geri ekle.
+# 2d) G-TERS shadow -- DURDURULDU 2026-09-15 (reverse-G hipotezi rejim donunce yanlislandi, bkz
+#     g-reversed-live memory). Reboot'ta geri gelmesin diye kapatildi.
+
+# 2e) TREND-LONG/NAKIT shadow (SUREKLI, detached). Cok-coin gunluk long-veya-nakit trend-takip.
+#     Kurallı yon-bahsi (edge degil): dususte nakite cek, short'lama. Kullanici karari 09-15.
+if (Test-PyRunning "trendlf_shadow.py") {
+    Write-Host "[2e] Trend-LF shadow ZATEN calisiyor -> atlandi"
 } else {
-    Write-Host "[2c] G-early shadow baslatiliyor (premium-cross erken-giris)..."
-    Start-Process $py -ArgumentList "scripts\g_early_shadow.py" -WindowStyle Hidden `
-        -RedirectStandardOutput "data\logs\g_early_shadow.log" `
-        -RedirectStandardError "data\logs\g_early_shadow.err"
+    Write-Host "[2e] Trend-LF shadow baslatiliyor (long-veya-nakit gunluk trend-takip)..."
+    Start-Process $py -ArgumentList "scripts\trendlf_shadow.py" -WindowStyle Hidden `
+        -RedirectStandardOutput "data\logs\trendlf_shadow.log" `
+        -RedirectStandardError "data\logs\trendlf_shadow.err"
     Start-Sleep -Seconds 2
 }
 
-# 2d) G-TERS shadow (SUREKLI, detached). Kullanici hipotezi: G-sinyalinin TERSI daha mi iyi (forward kiyas).
-if (Test-PyRunning "g_reverse_shadow.py") {
-    Write-Host "[2d] G-reverse shadow ZATEN calisiyor -> atlandi"
+# 2f) DIP-AL shadow (SUREKLI, detached). Likit uptrend-dip-al forward (survivorship-testli bulgu, 09-24).
+if (Test-PyRunning "buydip_shadow.py") {
+    Write-Host "[2f] Buydip shadow ZATEN calisiyor -> atlandi"
 } else {
-    Write-Host "[2d] G-reverse shadow baslatiliyor (G-sinyalinin tersi, forward test)..."
-    Start-Process $py -ArgumentList "scripts\g_reverse_shadow.py" -WindowStyle Hidden `
-        -RedirectStandardOutput "data\logs\g_reverse_shadow.log" `
-        -RedirectStandardError "data\logs\g_reverse_shadow.err"
+    Write-Host "[2f] Buydip shadow baslatiliyor (likit uptrend-dip-al forward)..."
+    Start-Process $py -ArgumentList "scripts\buydip_shadow.py" -WindowStyle Hidden `
+        -RedirectStandardOutput "data\logs\buydip_shadow.log" `
+        -RedirectStandardError "data\logs\buydip_shadow.err"
+    Start-Sleep -Seconds 2
+}
+
+# 2g) BUYDIP CANLI (GERCEK EMIR, kucuk test). Flag .env V3_BUYDIP_LIVE; kapaliyken emir gitmez.
+if (Test-PyRunning "engine.buydip_live") {   # '-m engine.buydip_live' calisir; 'buydip_live.py' ESLESMEZ (10-15 bug)
+    Write-Host "[2g] Buydip CANLI ZATEN calisiyor -> atlandi"
+} else {
+    Write-Host "[2g] Buydip CANLI baslatiliyor (GERCEK EMIR - kucuk test, flag'e bagli)..."
+    Start-Process $py -ArgumentList "-m","engine.buydip_live" -WindowStyle Hidden `
+        -RedirectStandardOutput "data\logs\buydip_live.log" `
+        -RedirectStandardError "data\logs\buydip_live.err"
+    Start-Sleep -Seconds 2
+}
+
+# 2h) BUYDIP CANLI PANOSU (hafif ~27MB, port 8061). Kullanici izleme ister. Agir panolar kapali kalir.
+if (Test-PyRunning "buydip_live_panel.py") {
+    Write-Host "[2h] Buydip panosu (8061) ZATEN calisiyor -> atlandi"
+} else {
+    Write-Host "[2h] Buydip CANLI panosu baslatiliyor (http://localhost:8061)..."
+    Start-Process $py -ArgumentList "dashboard\buydip_live_panel.py" -WindowStyle Hidden `
+        -RedirectStandardOutput "data\logs\buydip_live_panel.log" `
+        -RedirectStandardError "data\logs\buydip_live_panel.err"
     Start-Sleep -Seconds 2
 }
 

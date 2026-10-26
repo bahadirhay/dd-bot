@@ -96,6 +96,7 @@ class Config:
     # Kalan tek bilinmeyen: gercek-fill -> bu modul kucuk boyutla olcer. bkz [[funding-positioning-validated-aug2026]]
     V3_G_LIVE = os.getenv("V3_G_LIVE", "false").lower() in ("1", "true", "yes")
     V3_G_MARGIN_USD = float(os.getenv("V3_G_MARGIN_USD", "10"))
+    V3_BUYDIP_LIVE = os.getenv("V3_BUYDIP_LIVE", "false").lower() in ("1", "true", "yes")  # buydip kucuk canli test
     V3_G_LEVERAGE = int(os.getenv("V3_G_LEVERAGE", "3"))
 
     # mmbot3 yapı / SL-TP (structure_levels + structure_analyzer)

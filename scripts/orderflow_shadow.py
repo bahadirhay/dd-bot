@@ -31,7 +31,9 @@ DB = os.path.join(_DATADIR, "orderflow_shadow.db")
 COINS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT",
          "XRPUSDT", "AVAXUSDT", "LINKUSDT", "DOGEUSDT"]
 INTERVAL = 60          # sn (dakika basi snapshot)
-DEPTH_LIMIT = 100      # emir defteri seviye sayisi
+DEPTH_LIMIT = 1000     # emir defteri seviye sayisi (100 COK SIGDI: BTC/ETH'de 100 seviye ±5bps
+                       # icinde kaliyordu -> obi5=obi10=obi25 bant-cokme %100. 1000 = Binance max,
+                       # sikki-tik coinlerde ±25bps'i gercekten kapsar. Denetim 2026-09-13.)
 BANDS_BPS = [5, 10, 25]  # OBI hesap bantlari
 
 

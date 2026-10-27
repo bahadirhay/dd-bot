@@ -41,14 +41,15 @@ MAX_OPEN = 5                 # ayni anda max pozisyon -> max ~$60 maruz kalma (h
                              # Sinyaller kumelenir (en yogun gun 35 sinyal) -> az slot edge'i kaciriyordu.
 STOP_EXPERIMENT_USDT = -35.0 # 5-slot (daha cok eszamanli) -> normal-swing buyur; -28 erken keserdi.
                              # -35 = buyuk-kitapta normal-drawdown'i kesmez, sadece cokmus-edge'de tetiklenir.
-# ── FELAKET-STOP (eklendi 10-26, kullanici onayi). Test (327 sinyal, 4-ceyrek): getiriye NOTR (+306->+318),
-# 55 buyuk-kazananin HEPSI korunur (stop kaybeden coker uzerine tetiklenir, kazanan degil), en-kotu kuyruk
-# -52%->-38% kesilir. Kar artirmaz = TAIL/sermaye-koruma sigortasi. Girişte DROP_CAP=20 (dip<=-20 alma);
-# tutarken -25'e inerse cik (QUSDT -52% felaketini onler). Cekirdek sinyale (uptrend+dip+10g) dokunmaz.
-CATASTROPHE_STOP_PCT = -25.0
-STOP_EFFECTIVE_TS = 1793017117  # 2026-10-26 15:18. SADECE bu tarihten SONRA acilan pozisyonlara uygulanir.
-                                # Mevcut QUSDT(-52%)/BTW grandfathered: -25 penceresi gecti, dibe zorla satma
-                                # (5.5g kaldi, sonuc tahmin-edilemez); 10-gun kurali kapatir. Stop isini ileride yapar.
+# ── FELAKET-STOP: KALDIRILDI 10-27 (kullanici karari). Eklenmisti 10-26, ama QUSDT -52%->+80% V-donus
+# yasadi (grandfathered oldugu icin kacirmadik). Stop-pismanlik analizi (289 sinyal): stop %8 tetikler,
+# tarihsel HAFIF iyi (+179bps, %62 dogru kesim) AMA 289'da V-donus=0; QUSDT emsalsiz aykiri. Hesap: tek
+# QUSDT-tipi (-25->+80 = ~+10500bps kacan) stop'u +14->net NEGATIFE cevirir. Backtest getiri zaten NOTR
+# (+306 vs +318). buydip'in edge'i NADIR ASIMETRIK KAZANAN = V-donus; stop onu kesebilir = teze saldiri.
+# Koruma yeterli: piyasa-filtresi (dusen piyasada girme) + kumulatif STOP_EXPERIMENT (-35 kill-switch) +
+# kucuk boyut. CATASTROPHE_STOP_PCT=None -> kapi kapali (kod durur, geri almak icin deger ver).
+CATASTROPHE_STOP_PCT = None
+STOP_EFFECTIVE_TS = 1793017117  # (artik kullanilmiyor; stop kapaliyken onemsiz)
 
 _DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "buydip_live.db")
 _filters = {}; _last_day = 0; _lock_sock = None
@@ -208,8 +209,8 @@ def tick():
                 "SELECT symbol,open_ts,qty,entry FROM buydip_live WHERE status='OPEN'").fetchall():
             if now - ots >= HOLD_DAYS*86400:
                 _close(c, sym, ots, qty, entry, hedge); continue
-            # FELAKET-STOP: sadece STOP_EFFECTIVE_TS'den sonra acilanlar (eskiler grandfathered)
-            if ots >= STOP_EFFECTIVE_TS:
+            # FELAKET-STOP: KALDIRILDI (CATASTROPHE_STOP_PCT=None -> blok atlanir). Deger verilirse yeniden aktif.
+            if CATASTROPHE_STOP_PCT is not None and ots >= STOP_EFFECTIVE_TS:
                 try:
                     pxr = _get(f"{cfg.REST}/fapi/v1/ticker/price?symbol={sym}")
                     px = float(pxr.get("price", 0) or 0)

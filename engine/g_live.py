@@ -52,8 +52,10 @@ LOCK_PORT = 57602
 # (boga/ayi bilemez). Filtresiz+ters son-veride +60bps/isl (en iyi varyant). YAPISAL RISK: ters=momentum
 # ayida/donuste patlar (contrarian bogada patladi gibi) -> boyut KUCUK (margin/kaldirac degismez, risk sinirli).
 # Geri almak icin: REVERSE_MODE=False + USE_FILTER=True.
-REVERSE_MODE = True    # True: funding sinyalinin TERSI (momentum, kalabalikla). False: klasik contrarian.
-USE_FILTER = False     # False: 12h-trend filtresi KAPALI (her taze funding-uc sinyalinde ac).
+# 2026-11 KAPATILDI: G gercek parada -$42.66 (110 islem, 6Agu-12Eyl, HER coin negatif, contrarian VE ters
+# ikisi de). V3_G_LIVE=false. Guvenli varsayilana donduruldu (kazara re-enable yanlislanmis ters-modu calistirmasin).
+REVERSE_MODE = False   # True: funding sinyalinin TERSI (momentum). False: klasik contrarian (orijinal).
+USE_FILTER = True      # True: 12h-trend filtresi (dogrulanmis varyant). G kapali oldugu icin pratikte etkisiz.
 
 _open: dict = {}          # symbol -> pozisyon kaydi
 _lock = threading.Lock()

@@ -111,6 +111,18 @@ if (Test-PyRunning "engine.buydip_live") {   # '-m engine.buydip_live' calisir; 
     Start-Sleep -Seconds 2
 }
 
+# 2i) VDPM trend-beta shadow (PAPER, EMIR YOK). 4h-breakout+delta+rejim+breadth LONG-only forward.
+#     Dogrulanmis (perm p=0.0000, Sharpe+4, slippage-dayanikli) AMA trend-beta+tek-rejim -> forward dogrulama.
+if (Test-PyRunning "vdpm_shadow.py") {
+    Write-Host "[2i] VDPM shadow ZATEN calisiyor -> atlandi"
+} else {
+    Write-Host "[2i] VDPM shadow baslatiliyor (4h-breakout LONG-only trend-beta forward, PAPER)..."
+    Start-Process $py -ArgumentList "scripts\vdpm_shadow.py" -WindowStyle Hidden `
+        -RedirectStandardOutput "data\logs\vdpm_shadow.log" `
+        -RedirectStandardError "data\logs\vdpm_shadow.err"
+    Start-Sleep -Seconds 2
+}
+
 # 2h) BUYDIP CANLI PANOSU (hafif ~27MB, port 8061). Kullanici izleme ister. Agir panolar kapali kalir.
 if (Test-PyRunning "buydip_live_panel.py") {
     Write-Host "[2h] Buydip panosu (8061) ZATEN calisiyor -> atlandi"

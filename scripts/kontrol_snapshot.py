@@ -73,6 +73,22 @@ def main():
     except Exception as e:
         L.append(f"- HATA: {e}")
 
+    # VDPM + DIP-BOUNCE (yeni dogrulanmis adaylar, forward)
+    L.append("\n## YENI ADAYLAR (forward, paper)\n")
+    for dbfile, tbl, opcol, label in [("vdpm_shadow.db", "vdpm", "signal_ts", "VDPM trend-beta (bull-trend LONG)"),
+                                       ("dipbounce_shadow.db", "dipb", "signal_ts", "DIP-BOUNCE (oversold-sicrama LONG)")]:
+        try:
+            cx = sqlite3.connect(os.path.join(BOT, "data", dbfile))
+            op = cx.execute(f"SELECT COUNT(*) FROM {tbl} WHERE status='OPEN'").fetchone()[0]
+            cl = cx.execute(f"SELECT COUNT(*),COALESCE(AVG(pnl_bps),0),COALESCE(SUM(pnl_bps),0),"
+                            f"SUM(CASE WHEN pnl_bps>0 THEN 1 ELSE 0 END) FROM {tbl} WHERE status='CLOSED'").fetchone()
+            wr = (100*cl[3]/cl[0]) if cl[0] else 0
+            L.append(f"- {label}: {op} acik, {cl[0]} kapali | ort {cl[1]:+.0f}bps | toplam {cl[2]:+.0f}bps | win %{wr:.0f}")
+            if cl[0] >= 10:
+                L.append(f"    -> backtest kiyas: {'VDPM +163' if tbl=='vdpm' else 'dip-bounce +54'}bps bekleniyordu; forward tuttu mu?")
+        except Exception as e:
+            L.append(f"- {label}: veri yok ({e})")
+
     out = os.path.join(BOT, "reports", f"KONTROL_{dt.datetime.now().strftime('%Y-%m-%d')}.md")
     txt = "\n".join(L) + "\n"
     with open(out, "w", encoding="utf-8") as f:

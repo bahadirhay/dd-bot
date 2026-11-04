@@ -37,6 +37,8 @@ if (-not (Running "trendlf_shadow.py"))  { StartShadow "scripts\trendlf_shadow.p
 if (-not (Running "buydip_shadow.py"))   { StartShadow "scripts\buydip_shadow.py"   "buydip_shadow";   $acted += "buydip" }
 # 4b) VDPM trend-beta shadow (paper, LONG-only forward dogrulama)
 if (-not (Running "vdpm_shadow.py"))     { StartShadow "scripts\vdpm_shadow.py"     "vdpm_shadow";     $acted += "vdpm" }
+# 4c) Dip-bounce shadow (paper, oversold-sicrama forward dogrulama)
+if (-not (Running "dipbounce_shadow.py")){ StartShadow "scripts\dipbounce_shadow.py" "dipbounce_shadow"; $acted += "dipbounce" }
 # 5) Buydip CANLI (gercek emir, flag'e bagli; sinyal kacmasin diye diri tut)
 #    NOT: surec '-m engine.buydip_live' olarak calisir -> 'buydip_live.py' ESLESMEZ -> 55-surec bug'i (10-15).
 #    'engine.buydip_live' ara (panel 'buydip_live_panel' ile karismaz).

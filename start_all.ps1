@@ -123,6 +123,18 @@ if (Test-PyRunning "vdpm_shadow.py") {
     Start-Sleep -Seconds 2
 }
 
+# 2j) DIP-BOUNCE shadow (PAPER, EMIR YOK). RSI<30+SMA<-5% oversold-sicrama LONG 5g forward.
+#     Tam sinav gecti (perm p=0.0000, 4-ceyrek 3/4+, slippage, plato). VDPM'e tamamlayici (her oversold'da ateşler).
+if (Test-PyRunning "dipbounce_shadow.py") {
+    Write-Host "[2j] Dip-bounce shadow ZATEN calisiyor -> atlandi"
+} else {
+    Write-Host "[2j] Dip-bounce shadow baslatiliyor (oversold-sicrama LONG forward, PAPER)..."
+    Start-Process $py -ArgumentList "scripts\dipbounce_shadow.py" -WindowStyle Hidden `
+        -RedirectStandardOutput "data\logs\dipbounce_shadow.log" `
+        -RedirectStandardError "data\logs\dipbounce_shadow.err"
+    Start-Sleep -Seconds 2
+}
+
 # 2h) BUYDIP CANLI PANOSU (hafif ~27MB, port 8061). Kullanici izleme ister. Agir panolar kapali kalir.
 if (Test-PyRunning "buydip_live_panel.py") {
     Write-Host "[2h] Buydip panosu (8061) ZATEN calisiyor -> atlandi"

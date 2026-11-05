@@ -39,6 +39,8 @@ if (-not (Running "buydip_shadow.py"))   { StartShadow "scripts\buydip_shadow.py
 if (-not (Running "vdpm_shadow.py"))     { StartShadow "scripts\vdpm_shadow.py"     "vdpm_shadow";     $acted += "vdpm" }
 # 4c) Dip-bounce shadow (paper, oversold-sicrama forward dogrulama)
 if (-not (Running "dipbounce_shadow.py")){ StartShadow "scripts\dipbounce_shadow.py" "dipbounce_shadow"; $acted += "dipbounce" }
+# 4d) Range-fade shadow (paper, aralik-fade forward dogrulama)
+if (-not (Running "rangefade_shadow.py")) { StartShadow "scripts\rangefade_shadow.py" "rangefade_shadow"; $acted += "rangefade" }
 # 5) Buydip CANLI (gercek emir, flag'e bagli; sinyal kacmasin diye diri tut)
 #    NOT: surec '-m engine.buydip_live' olarak calisir -> 'buydip_live.py' ESLESMEZ -> 55-surec bug'i (10-15).
 #    'engine.buydip_live' ara (panel 'buydip_live_panel' ile karismaz).

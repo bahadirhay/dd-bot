@@ -76,7 +76,8 @@ def main():
     # VDPM + DIP-BOUNCE (yeni dogrulanmis adaylar, forward)
     L.append("\n## YENI ADAYLAR (forward, paper)\n")
     for dbfile, tbl, opcol, label in [("vdpm_shadow.db", "vdpm", "signal_ts", "VDPM trend-beta (bull-trend LONG)"),
-                                       ("dipbounce_shadow.db", "dipb", "signal_ts", "DIP-BOUNCE (oversold-sicrama LONG)")]:
+                                       ("dipbounce_shadow.db", "dipb", "signal_ts", "DIP-BOUNCE (oversold-sicrama LONG)"),
+                                       ("rangefade_shadow.db", "rf", "open_ts", "RANGE-FADE (aralik, EN GUCLU aday)")]:
         try:
             cx = sqlite3.connect(os.path.join(BOT, "data", dbfile))
             op = cx.execute(f"SELECT COUNT(*) FROM {tbl} WHERE status='OPEN'").fetchone()[0]

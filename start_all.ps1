@@ -135,6 +135,18 @@ if (Test-PyRunning "dipbounce_shadow.py") {
     Start-Sleep -Seconds 2
 }
 
+# 2k) RANGE-FADE shadow (PAPER, EMIR YOK). Pivot dirençte SHORT / destekte LONG, karsi-seviye TP + %3 stop.
+#     Tam sinav GECTI (bagimsiz +144bps win56, 4-ceyrek 4/4+, perm p=0.0000, slippage-dayanikli). Forward.
+if (Test-PyRunning "rangefade_shadow.py") {
+    Write-Host "[2k] Range-fade shadow ZATEN calisiyor -> atlandi"
+} else {
+    Write-Host "[2k] Range-fade shadow baslatiliyor (aralik-fade forward, PAPER)..."
+    Start-Process $py -ArgumentList "scripts\rangefade_shadow.py" -WindowStyle Hidden `
+        -RedirectStandardOutput "data\logs\rangefade_shadow.log" `
+        -RedirectStandardError "data\logs\rangefade_shadow.err"
+    Start-Sleep -Seconds 2
+}
+
 # 2h) BUYDIP CANLI PANOSU (hafif ~27MB, port 8061). Kullanici izleme ister. Agir panolar kapali kalir.
 if (Test-PyRunning "buydip_live_panel.py") {
     Write-Host "[2h] Buydip panosu (8061) ZATEN calisiyor -> atlandi"

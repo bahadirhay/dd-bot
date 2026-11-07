@@ -49,6 +49,12 @@ if (-not (Running "engine.buydip_live")) {
         -RedirectStandardOutput "$botDir\data\logs\buydip_live.log" -RedirectStandardError "$botDir\data\logs\buydip_live.err"
     $acted += "buydip_live"
 }
+# 6) Buydip CANLI PANOSU (8061) - kullanici izleme ister, dusunce geri getir (daha once watchdog izlemiyordu)
+if (-not (Running "buydip_live_panel")) {
+    Start-Process $py -ArgumentList "dashboard\buydip_live_panel.py" -WindowStyle Hidden `
+        -RedirectStandardOutput "$botDir\data\logs\buydip_live_panel.log" -RedirectStandardError "$botDir\data\logs\buydip_live_panel.err"
+    $acted += "buydip_panel"
+}
 
 if ($acted.Count -gt 0) {
     "[$ts] WATCHDOG geri baslatti: $($acted -join ', ')" | Out-File -FilePath $log -Append -Encoding utf8
